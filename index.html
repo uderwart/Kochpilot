@@ -5,20 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Rezept-Finder</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.9/babel.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #FDF6F0; font-family: 'DM Sans', sans-serif; color: #3B2F2F; }
+  body { font-family: 'DM Sans', sans-serif; background: #FDF6F0; min-height: 100vh; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  #root { min-height: 100vh; }
+  textarea:focus, select:focus { border-color: #D4654A !important; outline: none; }
+  button:active { transform: scale(0.97); }
+  .drag-over { border-color: #D4654A !important; background: #FDE8D0 !important; }
 </style>
 </head>
 <body>
 <div id="root"></div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
-
 <script type="text/babel">
 const { useState, useRef, useEffect, useCallback } = React;
 
@@ -32,21 +32,15 @@ const C = {
 const API_MODEL = "claude-sonnet-4-20250514";
 
 // ==================== API ====================
-async function callClaude(apiKey, systemPrompt, userContent, useWebSearch = false) {
-  const body = {
-    model: API_MODEL, max_tokens: 4096, system: systemPrompt,
-    messages: [{ role: "user", content: userContent }],
-  };
-  if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
+async function callClaude(apiKey, systemPrompt, userContent, useWebSearch=false) {
+  const body = { model: API_MODEL, max_tokens: 4096, system: systemPrompt, messages: [{ role:"user", content: userContent }] };
+  if (useWebSearch) body.tools = [{ type:"web_search_20250305", name:"web_search" }];
   const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+    method:"POST",
+    headers:{ "Content-Type":"application/json", "x-api-key": apiKey, "anthropic-version":"2023-06-01", "anthropic-dangerous-direct-browser-access":"true" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`API-Fehler (${res.status}): ${err}`);
-  }
+  if (!res.ok) { const err = await res.text(); throw new Error("API-Fehler (" + res.status + "): " + err); }
   const data = await res.json();
   return data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
 }
@@ -61,24 +55,19 @@ function extractJSON(text) {
   throw new Error("Kein JSON gefunden");
 }
 
-function downloadHTML(html, filename) {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click();
-  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
-}
-
 // ==================== LOADING ====================
 const LOAD_SEARCH = ["Durchstöbere Rezepte…","Prüfe Eiweißkombinationen…","Berechne Nährwerte…","Fast geschafft…"];
 const LOAD_RECIPE = ["Lese das Rezept im Detail…","Sortiere Zutaten und Schritte…","Berechne Mengen und Timer…"];
 
 function LoadingScreen({ messages }) {
   const [idx, setIdx] = useState(0);
-  useEffect(() => { const iv = setInterval(() => setIdx(i => (i+1) % messages.length), 2500); return () => clearInterval(iv); }, [messages]);
+  useEffect(() => {
+    const iv = setInterval(() => setIdx(i => (i+1) % messages.length), 2500);
+    return () => clearInterval(iv);
+  }, [messages]);
   return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:60,gap:24}}>
-      <div style={{width:48,height:48,border:`4px solid ${C.border}`,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.9s linear infinite"}}/>
+      <div style={{width:48,height:48,border:"4px solid "+C.border,borderTopColor:C.accent,borderRadius:"50%",animation:"spin 0.9s linear infinite"}} />
       <p style={{fontFamily:"'DM Sans',sans-serif",fontSize:15,color:C.textLight,textAlign:"center",minHeight:24}}>{messages[idx]}</p>
     </div>
   );
@@ -86,51 +75,42 @@ function LoadingScreen({ messages }) {
 
 // ==================== API KEY SCREEN ====================
 function ApiKeyScreen({ onSave }) {
-  const [key, setKey] = useState(() => localStorage.getItem("rf_api_key") || "");
-  const [show, setShow] = useState(false);
-  const handleSave = () => {
-    if (!key.trim()) return;
-    localStorage.setItem("rf_api_key", key.trim());
-    onSave(key.trim());
-  };
+  const [key, setKey] = useState("");
   return (
     <div style={{maxWidth:480,margin:"0 auto",padding:"60px 24px",textAlign:"center"}}>
-      <div style={{fontSize:42,marginBottom:12}}>🔑</div>
-      <h1 style={{fontFamily:"'DM Serif Display',serif",fontSize:"1.8rem",color:C.text,marginBottom:8}}>API-Schlüssel</h1>
-      <p style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,color:C.textLight,lineHeight:1.6,marginBottom:28}}>
-        Dein Claude API-Key wird nur lokal im Browser gespeichert und nie an Dritte übertragen.
-        Du findest deinen Key unter <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style={{color:C.accent}}>console.anthropic.com</a>.
+      <div style={{fontSize:42,marginBottom:8}}>🔑</div>
+      <h1 style={{fontFamily:"'DM Serif Display',serif",fontSize:"1.8rem",color:C.text,marginBottom:8}}>Rezept-Finder</h1>
+      <p style={{fontFamily:"'DM Sans',sans-serif",color:C.textLight,fontSize:14,marginBottom:32,lineHeight:1.5}}>
+        Bitte gib deinen Claude API-Key ein.<br/>
+        <span style={{fontSize:12}}>Der Key bleibt nur in deinem Browser gespeichert und wird nirgendwo hin gesendet außer an die Anthropic API.</span>
       </p>
-      <div style={{position:"relative",marginBottom:16}}>
-        <input
-          type={show ? "text" : "password"}
-          value={key}
-          onChange={e => setKey(e.target.value)}
-          placeholder="sk-ant-..."
-          style={{
-            width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:15,padding:"14px 50px 14px 16px",
-            border:`2px solid ${C.border}`,borderRadius:12,outline:"none",background:C.card,color:C.text,
-            boxSizing:"border-box",
-          }}
-          onKeyDown={e => e.key === "Enter" && handleSave()}
-        />
-        <button onClick={() => setShow(!show)} style={{
-          position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",
-          background:"none",border:"none",fontSize:18,cursor:"pointer",color:C.textLight,
-        }}>{show ? "🙈" : "👁"}</button>
-      </div>
-      <button onClick={handleSave} disabled={!key.trim()} style={{
-        width:"100%",padding:"14px 24px",fontFamily:"'DM Sans',sans-serif",fontSize:16,fontWeight:700,
-        background: key.trim() ? `linear-gradient(135deg,${C.accent},${C.accentDark})` : C.border,
-        color:"#fff",border:"none",borderRadius:12,cursor: key.trim() ? "pointer" : "not-allowed",
-        boxShadow: key.trim() ? "0 4px 20px rgba(212,101,74,0.3)" : "none",
-      }}>Weiter</button>
+      <input
+        type="password"
+        value={key}
+        onChange={e => setKey(e.target.value)}
+        placeholder="sk-ant-api03-..."
+        style={{
+          width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:15,padding:"14px 18px",
+          border:"2px solid "+C.border,borderRadius:14,outline:"none",background:C.card,
+          color:C.text,marginBottom:16,boxSizing:"border-box",
+        }}
+      />
+      <button
+        disabled={!key.trim()}
+        onClick={() => onSave(key.trim())}
+        style={{
+          width:"100%",padding:"14px 24px",fontFamily:"'DM Sans',sans-serif",fontSize:16,fontWeight:700,
+          background: key.trim() ? "linear-gradient(135deg,"+C.accent+","+C.accentDark+")" : C.border,
+          color:"#fff",border:"none",borderRadius:14,cursor: key.trim() ? "pointer" : "not-allowed",
+          transition:"all 0.25s",boxShadow: key.trim() ? "0 4px 20px rgba(212,101,74,0.3)" : "none",
+        }}
+      >Speichern & Starten</button>
     </div>
   );
 }
 
-// ==================== SEARCH SCREEN ====================
-function SearchScreen({ onSearch, onChangeKey }) {
+// ==================== SEARCH ====================
+function SearchScreen({ onSearch }) {
   const [query, setQuery] = useState("");
   const [maxTime, setMaxTime] = useState("");
   const [cuisine, setCuisine] = useState("");
@@ -139,20 +119,22 @@ function SearchScreen({ onSearch, onChangeKey }) {
   const fileRef = useRef();
   const dropRef = useRef();
 
-  const handleFile = file => {
+  const handleFile = (file) => {
     if (!file || !file.type.startsWith("image/")) return;
     const reader = new FileReader();
-    reader.onload = e => {
-      const full = e.target.result; const data = full.split(",")[1];
+    reader.onload = (e) => {
+      const full = e.target.result;
+      const data = full.split(",")[1];
       const mt = file.type === "image/heic" ? "image/jpeg" : file.type;
-      setImage({ base64: data, preview: full, name: file.name, mediaType: mt });
+      setImage({ base64:data, preview:full, name:file.name, mediaType:mt });
     };
     reader.readAsDataURL(file);
   };
-  const handleDrop = e => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]); };
+  const handleDrop = (e) => { e.preventDefault(); e.stopPropagation(); dropRef.current?.classList.remove("drag-over"); if(e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]); };
   const canSubmit = query.trim() || image;
-  const fl = {display:"block",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:600,color:C.textLight,marginBottom:5,letterSpacing:0.3};
-  const fs = {width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:14,padding:"10px 14px",border:`2px solid ${C.border}`,borderRadius:10,outline:"none",background:C.card,color:C.text,cursor:"pointer",boxSizing:"border-box",appearance:"auto"};
+
+  const fL = {display:"block",fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:600,color:C.textLight,marginBottom:5,letterSpacing:0.3};
+  const fS = {width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:14,padding:"10px 14px",border:"2px solid "+C.border,borderRadius:10,outline:"none",background:C.card,color:C.text,cursor:"pointer",boxSizing:"border-box",appearance:"auto"};
 
   return (
     <div style={{maxWidth:600,margin:"0 auto",padding:"40px 24px"}}>
@@ -162,94 +144,98 @@ function SearchScreen({ onSearch, onChangeKey }) {
         <p style={{fontFamily:"'DM Sans',sans-serif",color:C.textLight,fontSize:14,marginTop:8}}>Finde das perfekte Rezept — proteinoptimiert und auf dich zugeschnitten</p>
       </div>
 
-      <textarea value={query} onChange={e => setQuery(e.target.value)} placeholder="Was hast du da? Oder worauf hast du Lust?" rows={3}
-        style={{width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:15,padding:"16px 18px",border:`2px solid ${C.border}`,borderRadius:14,resize:"none",outline:"none",background:C.card,color:C.text,lineHeight:1.5,boxSizing:"border-box",marginBottom:16}}
-        onFocus={e => e.target.style.borderColor = C.accent} onBlur={e => e.target.style.borderColor = C.border}
-      />
-
-      {/* Filter */}
-      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-        <div style={{flex:1,minWidth:100}}>
-          <label style={fl}>⏱ Max. Dauer</label>
-          <select value={maxTime} onChange={e => setMaxTime(e.target.value)} style={fs}>
-            <option value="">Egal</option>
-            {["15","20","30","45","60","90"].map(v => <option key={v} value={v}>{v} Min.</option>)}
-          </select>
-        </div>
-        <div style={{flex:1,minWidth:100}}>
-          <label style={fl}>🌍 Küche / Region</label>
-          <select value={cuisine} onChange={e => setCuisine(e.target.value)} style={fs}>
-            <option value="">Egal</option>
-            {["Afrikanisch","Asiatisch","Deutsch","Französisch","Griechisch","Indisch","Italienisch","Japanisch","Koreanisch","Levantinisch","Mexikanisch","Orientalisch","Südamerikanisch","Thai","Türkisch","Vietnamesisch"].map(v => <option key={v} value={v}>{v}</option>)}
-          </select>
-        </div>
-        <div style={{flex:1,minWidth:100}}>
-          <label style={fl}>🥗 Ernährung</label>
-          <select value={diet} onChange={e => setDiet(e.target.value)} style={fs}>
-            <option value="">Egal</option>
-            {["Fisch","Fleisch","Vegetarisch","Vegan"].map(v => <option key={v} value={v}>{v}</option>)}
-          </select>
-        </div>
+      <div style={{position:"relative",marginBottom:16}}>
+        <textarea value={query} onChange={e=>setQuery(e.target.value)} placeholder="Was hast du da? Oder worauf hast du Lust?" rows={3}
+          style={{width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:15,padding:"16px 18px",border:"2px solid "+C.border,borderRadius:14,resize:"none",outline:"none",background:C.card,color:C.text,lineHeight:1.5,boxSizing:"border-box",transition:"border-color 0.2s"}} />
       </div>
 
       {/* Drop Zone */}
-      <div ref={dropRef} onClick={() => fileRef.current?.click()}
-        onDragOver={e => e.preventDefault()} onDrop={handleDrop}
-        style={{border:`2px dashed ${image ? C.green : C.border}`,borderRadius:14,padding:image?12:28,textAlign:"center",cursor:"pointer",background:image?C.greenLight+"33":C.legendBg,marginBottom:20}}>
-        <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e => handleFile(e.target.files?.[0])}/>
+      <div ref={dropRef} onClick={()=>fileRef.current?.click()}
+        onDragOver={e=>{e.preventDefault();dropRef.current?.classList.add("drag-over")}}
+        onDragLeave={()=>dropRef.current?.classList.remove("drag-over")}
+        onDrop={handleDrop}
+        style={{border:"2px dashed "+(image?C.green:C.border),borderRadius:14,padding:image?12:28,textAlign:"center",cursor:"pointer",background:image?C.greenLight+"33":C.legendBg,transition:"all 0.25s",marginBottom:20}}>
+        <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleFile(e.target.files?.[0])} />
         {image ? (
           <div style={{display:"flex",alignItems:"center",gap:12}}>
-            <img src={image.preview} alt="" style={{width:64,height:64,objectFit:"cover",borderRadius:10}}/>
+            <img src={image.preview} alt="Vorschau" style={{width:64,height:64,objectFit:"cover",borderRadius:10}} />
             <div style={{flex:1,textAlign:"left"}}>
-              <div style={{fontSize:13,fontWeight:600,color:C.text}}>{image.name}</div>
-              <div style={{fontSize:12,color:C.green}}>✓ Foto bereit</div>
+              <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,color:C.text}}>{image.name}</div>
+              <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:12,color:C.green}}>✓ Foto bereit</div>
             </div>
-            <button onClick={e => {e.stopPropagation();setImage(null);}} style={{width:28,height:28,borderRadius:"50%",border:"none",background:C.accent,color:"#fff",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            <button onClick={e=>{e.stopPropagation();setImage(null)}} style={{width:28,height:28,borderRadius:"50%",border:"none",background:C.accent,color:"#fff",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
           </div>
         ) : (
           <React.Fragment>
             <div style={{fontSize:28,marginBottom:8}}>📷</div>
-            <div style={{fontSize:13,color:C.textLight,lineHeight:1.5}}>Foto hierher ziehen oder klicken<br/><span style={{fontSize:12}}>z. B. aus einem Rezeptbuch, Zeitschrift oder Verpackung</span></div>
+            <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,color:C.textLight,lineHeight:1.5}}>
+              Foto hierher ziehen oder klicken<br/><span style={{fontSize:12}}>z. B. aus einem Rezeptbuch, Zeitschrift oder Verpackung</span>
+            </div>
           </React.Fragment>
         )}
       </div>
 
-      <button disabled={!canSubmit} onClick={() => onSearch(query.trim(),image,maxTime,cuisine,diet)}
-        style={{width:"100%",padding:"16px 24px",fontSize:16,fontWeight:700,fontFamily:"'DM Sans',sans-serif",background:canSubmit?`linear-gradient(135deg,${C.accent},${C.accentDark})`:C.border,color:"#fff",border:"none",borderRadius:14,cursor:canSubmit?"pointer":"not-allowed",boxShadow:canSubmit?"0 4px 20px rgba(212,101,74,0.3)":"none",marginBottom:16}}>
+      {/* Filters */}
+      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>
+        <div style={{flex:1,minWidth:100}}>
+          <label style={fL}>⏱ Max. Dauer</label>
+          <select value={maxTime} onChange={e=>setMaxTime(e.target.value)} style={fS}>
+            <option value="">Egal</option>
+            {["15","20","30","45","60","90"].map(v=><option key={v} value={v}>{v} Min.</option>)}
+          </select>
+        </div>
+        <div style={{flex:1,minWidth:100}}>
+          <label style={fL}>🌍 Küche / Region</label>
+          <select value={cuisine} onChange={e=>setCuisine(e.target.value)} style={fS}>
+            <option value="">Egal</option>
+            {["Afrikanisch","Asiatisch","Deutsch","Französisch","Griechisch","Indisch","Italienisch","Japanisch","Koreanisch","Levantinisch","Mexikanisch","Orientalisch","Südamerikanisch","Thai","Türkisch","Vietnamesisch"].map(v=><option key={v} value={v}>{v}</option>)}
+          </select>
+        </div>
+        <div style={{flex:1,minWidth:100}}>
+          <label style={fL}>🥩 Ernährung</label>
+          <select value={diet} onChange={e=>setDiet(e.target.value)} style={fS}>
+            <option value="">Egal</option>
+            {["Fisch","Fleisch","Vegetarisch","Vegan"].map(v=><option key={v} value={v}>{v}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <button disabled={!canSubmit} onClick={()=>onSearch(query.trim(),image,maxTime,cuisine,diet)}
+        style={{width:"100%",padding:"16px 24px",fontFamily:"'DM Sans',sans-serif",fontSize:16,fontWeight:700,
+        background:canSubmit?"linear-gradient(135deg,"+C.accent+","+C.accentDark+")":C.border,
+        color:"#fff",border:"none",borderRadius:14,cursor:canSubmit?"pointer":"not-allowed",
+        transition:"all 0.25s",boxShadow:canSubmit?"0 4px 20px rgba(212,101,74,0.3)":"none"}}>
         🔍 Rezepte suchen
       </button>
-
-      <div style={{textAlign:"center"}}>
-        <button onClick={onChangeKey} style={{background:"none",border:"none",fontSize:12,color:C.textLight,cursor:"pointer",textDecoration:"underline"}}>🔑 API-Schlüssel ändern</button>
-      </div>
     </div>
   );
 }
 
 // ==================== SUGGESTIONS ====================
+const tagSt = {fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:500,padding:"4px 10px",borderRadius:10,background:C.legendBg,color:C.textLight};
+
 function SuggestionScreen({ suggestions, onSelect, onBack }) {
-  const tag = {fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:500,padding:"4px 10px",borderRadius:10,background:C.legendBg,color:C.textLight};
   return (
     <div style={{maxWidth:720,margin:"0 auto",padding:"32px 24px"}}>
-      <button onClick={onBack} style={{background:"none",border:"none",fontSize:14,color:C.accent,cursor:"pointer",marginBottom:20,padding:0}}>← Neue Suche</button>
+      <button onClick={onBack} style={{background:"none",border:"none",fontFamily:"'DM Sans',sans-serif",fontSize:14,color:C.accent,cursor:"pointer",marginBottom:20,padding:0,display:"flex",alignItems:"center",gap:6}}>← Neue Suche</button>
       <h2 style={{fontFamily:"'DM Serif Display',serif",fontSize:"1.5rem",color:C.text,marginBottom:24}}>3 Vorschläge für dich</h2>
       <div style={{display:"flex",flexDirection:"column",gap:16}}>
         {suggestions.map((r,i) => (
-          <div key={i} style={{background:C.card,borderRadius:16,padding:24,boxShadow:"0 2px 16px rgba(60,40,30,0.07)",border:`1px solid ${C.border}`}}>
+          <div key={i} style={{background:C.card,borderRadius:16,padding:24,boxShadow:"0 2px 16px rgba(60,40,30,0.07)",border:"1px solid "+C.border}}>
             <h3 style={{fontFamily:"'DM Serif Display',serif",fontSize:"1.2rem",color:C.text,margin:"0 0 8px"}}>{r.name}</h3>
-            <p style={{fontSize:13,color:C.textLight,lineHeight:1.5,margin:"0 0 12px"}}>{r.description}</p>
+            <p style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,color:C.textLight,lineHeight:1.5,margin:"0 0 12px"}}>{r.description}</p>
             <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:12}}>
-              <span style={tag}>⏱ {r.time}</span>
-              <span style={tag}>{r.difficulty}</span>
+              <span style={tagSt}>⏱ {r.time}</span>
+              <span style={tagSt}>{r.difficulty}</span>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
-              {[["kcal",r.nutrition?.kcal],["Eiweiß",r.nutrition?.protein],["Fett",r.nutrition?.fat],["KH",r.nutrition?.carbs]].map(([l,v]) => v && (
-                <span key={l} style={{fontSize:11,fontWeight:600,padding:"4px 10px",borderRadius:12,background:C.legendBg,color:C.textLight}}>{l}: {v}</span>
+              {[["kcal",r.nutrition?.kcal],["Eiweiß",r.nutrition?.protein],["Fett",r.nutrition?.fat],["KH",r.nutrition?.carbs]].map(([l,v])=>v&&(
+                <span key={l} style={{fontFamily:"'DM Sans',sans-serif",fontSize:11,fontWeight:600,padding:"4px 10px",borderRadius:12,background:C.legendBg,color:C.textLight}}>{l}: {v}</span>
               ))}
             </div>
-            {r.proteinInfo && <div style={{fontSize:12,padding:"8px 12px",borderRadius:10,background:C.greenLight+"66",color:C.green,marginBottom:12,lineHeight:1.4}}>💪 {r.proteinInfo}</div>}
-            {r.source && <div style={{fontSize:11,color:C.textLight,marginBottom:12}}>Quelle: {r.source}</div>}
-            <button onClick={() => onSelect(r)} style={{padding:"12px 24px",fontSize:14,fontWeight:600,fontFamily:"'DM Sans',sans-serif",background:C.accent,color:"#fff",border:"none",borderRadius:10,cursor:"pointer"}}>Dieses Rezept wählen</button>
+            {r.proteinInfo && <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:12,padding:"8px 12px",borderRadius:10,background:C.greenLight+"66",color:C.green,marginBottom:12,lineHeight:1.4}}>💪 {r.proteinInfo}</div>}
+            {r.source && <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:11,color:C.textLight,marginBottom:12}}>Quelle: {r.source}</div>}
+            <button onClick={()=>onSelect(r)} style={{padding:"12px 24px",fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:600,background:C.accent,color:"#fff",border:"none",borderRadius:10,cursor:"pointer",transition:"all 0.2s"}}>Dieses Rezept wählen</button>
           </div>
         ))}
       </div>
@@ -258,6 +244,12 @@ function SuggestionScreen({ suggestions, onSelect, onBack }) {
 }
 
 // ==================== RECIPE CARD ====================
+const metaSt = {color:"rgba(255,255,255,0.85)",fontSize:13,fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:5};
+const secTitle = {fontFamily:"'DM Serif Display',serif",fontSize:"1.3rem",color:C.text,marginBottom:16};
+const chipSt = {fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,padding:"5px 14px",borderRadius:20};
+const portBtn = {width:38,height:38,borderRadius:"50%",border:"2px solid "+C.accent,background:"transparent",color:C.accent,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif"};
+const actBtn = (bg) => ({width:"100%",padding:"14px 24px",fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:600,background:bg,color:"#fff",border:"none",borderRadius:12,cursor:"pointer",transition:"all 0.2s"});
+
 function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
   const base = recipe.servings || 4;
   const [portions, setPortions] = useState(base);
@@ -265,94 +257,101 @@ function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
   const [timers, setTimers] = useState({});
   const timerRefs = useRef({});
 
-  const toggle = i => { const c=[...checked]; c[i]=!c[i]; setChecked(c); };
-  const scale = amt => {
-    if (!amt) return "";
-    const s = (amt/base)*portions;
+  const toggle = (i) => { const c=[...checked]; c[i]=!c[i]; setChecked(c); };
+  const scale = (amount) => {
+    if (!amount || amount===0) return "";
+    const s = (amount/base)*portions;
     if (s===Math.floor(s)) return s.toString();
     const n = Math.round(s*4)/4;
     if (n===Math.floor(n)) return n.toString();
     const w=Math.floor(n), f=n-w;
     let fs="";
-    if (Math.abs(f-0.25)<0.01) fs="¼"; else if (Math.abs(f-0.5)<0.01) fs="½"; else if (Math.abs(f-0.75)<0.01) fs="¾"; else fs=f.toFixed(1);
-    return w>0?`${w} ${fs}`:fs;
+    if(Math.abs(f-0.25)<0.01) fs="¼";
+    else if(Math.abs(f-0.5)<0.01) fs="½";
+    else if(Math.abs(f-0.75)<0.01) fs="¾";
+    else fs=f.toFixed(1);
+    return w>0?w+" "+fs:fs;
   };
-  const haveCount = checked.filter(Boolean).length;
-  const buyCount = checked.filter(c => !c).length;
-  const toggleTimer = (idx,secs) => {
-    if (timers[idx]) { clearInterval(timerRefs.current[idx]); setTimers(t => {const n={...t}; delete n[idx]; return n;}); return; }
-    setTimers(t => ({...t,[idx]:{remaining:secs,running:true}}));
-    timerRefs.current[idx] = setInterval(() => {
-      setTimers(t => { if(!t[idx]) return t; const rem=t[idx].remaining-1; if(rem<=0){clearInterval(timerRefs.current[idx]);return{...t,[idx]:{remaining:0,running:false,done:true}};} return{...t,[idx]:{...t[idx],remaining:rem}}; });
-    }, 1000);
+  const haveCount=checked.filter(Boolean).length, buyCount=checked.filter(c=>!c).length;
+
+  const toggleTimer = (idx, secs) => {
+    if(timers[idx]){ clearInterval(timerRefs.current[idx]); setTimers(t=>{const n={...t};delete n[idx];return n;}); return; }
+    setTimers(t=>({...t,[idx]:{remaining:secs,running:true}}));
+    timerRefs.current[idx]=setInterval(()=>{
+      setTimers(t=>{
+        if(!t[idx]) return t;
+        const rem=t[idx].remaining-1;
+        if(rem<=0){clearInterval(timerRefs.current[idx]);return{...t,[idx]:{remaining:0,running:false,done:true}};}
+        return{...t,[idx]:{...t[idx],remaining:rem}};
+      });
+    },1000);
   };
-  const fmt = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
-  const meta = {color:"rgba(255,255,255,0.85)",fontSize:13,fontFamily:"'DM Sans',sans-serif",display:"flex",alignItems:"center",gap:5};
-  const secT = {fontFamily:"'DM Serif Display',serif",fontSize:"1.3rem",color:C.text,marginBottom:16};
-  const chip = {fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,padding:"5px 14px",borderRadius:20};
-  const pBtn = {width:38,height:38,borderRadius:"50%",border:`2px solid ${C.accent}`,background:"transparent",color:C.accent,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"};
-  const aBtn = bg => ({width:"100%",padding:"14px 24px",fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:600,background:bg,color:"#fff",border:"none",borderRadius:12,cursor:"pointer"});
+  const fmtTime=(s)=>Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
 
   return (
     <div style={{maxWidth:680,margin:"0 auto",background:C.card,minHeight:"100vh",boxShadow:"0 0 60px rgba(60,40,30,0.08)"}}>
       {/* Header */}
-      <div style={{background:`linear-gradient(135deg,${C.accent},${C.accentDark})`,padding:"44px 28px 36px",position:"relative",overflow:"hidden"}}>
-        <div style={{position:"absolute",top:-40,right:-40,width:200,height:200,background:"rgba(255,255,255,0.06)",borderRadius:"50%"}}/>
-        <button onClick={onBack} style={{background:"rgba(255,255,255,0.18)",border:"none",color:"#fff",fontSize:12,padding:"5px 14px",borderRadius:20,cursor:"pointer",marginBottom:14,fontFamily:"'DM Sans',sans-serif"}}>← Zurück</button>
-        {recipe.tags && <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>{recipe.tags.map((t,i) => <span key={i} style={{background:"rgba(255,255,255,0.18)",color:"#fff",fontSize:11,fontWeight:600,letterSpacing:1.2,textTransform:"uppercase",padding:"4px 12px",borderRadius:16,fontFamily:"'DM Sans',sans-serif"}}>{t}</span>)}</div>}
+      <div style={{background:"linear-gradient(135deg,"+C.accent+","+C.accentDark+")",padding:"44px 28px 36px",position:"relative",overflow:"hidden"}}>
+        <div style={{position:"absolute",top:-40,right:-40,width:200,height:200,background:"rgba(255,255,255,0.06)",borderRadius:"50%"}} />
+        <button onClick={onBack} style={{background:"rgba(255,255,255,0.18)",border:"none",color:"#fff",fontFamily:"'DM Sans',sans-serif",fontSize:12,padding:"5px 14px",borderRadius:20,cursor:"pointer",marginBottom:14}}>← Zurück</button>
+        {recipe.tags && <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+          {recipe.tags.map((t,i)=><span key={i} style={{background:"rgba(255,255,255,0.18)",color:"#fff",fontSize:11,fontWeight:600,letterSpacing:1.2,textTransform:"uppercase",padding:"4px 12px",borderRadius:16,fontFamily:"'DM Sans',sans-serif"}}>{t}</span>)}
+        </div>}
         <h1 style={{fontFamily:"'DM Serif Display',serif",fontWeight:400,fontSize:"1.8rem",color:"#fff",lineHeight:1.2,margin:0,position:"relative",zIndex:1}}>{recipe.name}</h1>
         <div style={{display:"flex",gap:20,marginTop:16,flexWrap:"wrap"}}>
-          {recipe.time && <span style={meta}>⏱ {recipe.time}</span>}
-          {recipe.difficulty && <span style={meta}>✓ {recipe.difficulty}</span>}
-          <span style={meta}>👥 {portions} Portionen</span>
+          {recipe.time && <span style={metaSt}>⏱ {recipe.time}</span>}
+          {recipe.difficulty && <span style={metaSt}>✓ {recipe.difficulty}</span>}
+          <span style={metaSt}>👥 {portions} Portionen</span>
         </div>
       </div>
 
       <div style={{padding:"28px 28px 40px"}}>
         {/* Portionen */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:20,padding:18,background:C.legendBg,borderRadius:14,marginBottom:24}}>
-          <span style={{fontSize:13,fontWeight:600,color:C.textLight,textTransform:"uppercase",letterSpacing:0.8}}>Portionen</span>
-          <button onClick={() => setPortions(Math.max(1,portions-1))} style={pBtn}>−</button>
+          <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,fontWeight:600,color:C.textLight,textTransform:"uppercase",letterSpacing:0.8}}>Portionen</span>
+          <button onClick={()=>setPortions(Math.max(1,portions-1))} style={portBtn}>−</button>
           <span style={{fontFamily:"'DM Serif Display',serif",fontSize:26,color:C.accent,minWidth:32,textAlign:"center"}}>{portions}</span>
-          <button onClick={() => setPortions(Math.min(20,portions+1))} style={pBtn}>+</button>
+          <button onClick={()=>setPortions(Math.min(20,portions+1))} style={portBtn}>+</button>
         </div>
 
         {/* Zutaten */}
-        <h2 style={secT}>🧅 Zutaten</h2>
-        <div style={{display:"flex",gap:16,padding:"12px 16px",background:C.legendBg,borderRadius:10,marginBottom:16,fontSize:13}}>
-          <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:16,height:16,borderRadius:4,background:C.green}}/><span>✓ Vorhanden</span></div>
-          <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:16,height:16,borderRadius:4,border:`2px solid ${C.border}`,background:"#fff"}}/><span>○ Einkaufen</span></div>
+        <h2 style={secTitle}>🧅 Zutaten</h2>
+        <div style={{display:"flex",gap:16,padding:"12px 16px",background:C.legendBg,borderRadius:10,marginBottom:16,fontSize:13,fontFamily:"'DM Sans',sans-serif"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:16,height:16,borderRadius:4,background:C.green}} /><span>✓ Vorhanden</span></div>
+          <div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:16,height:16,borderRadius:4,border:"2px solid "+C.border,background:"#fff"}} /><span>○ Einkaufen</span></div>
         </div>
 
         {recipe.ingredients.map((ing,i) => (
-          <div key={i} onClick={() => toggle(i)} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 0",borderBottom:i<recipe.ingredients.length-1?`1px solid ${C.border}`:"none",cursor:"pointer",opacity:checked[i]?0.5:1,transition:"all 0.25s"}}>
-            <div style={{width:24,height:24,borderRadius:6,flexShrink:0,border:`2px solid ${checked[i]?C.green:C.border}`,background:checked[i]?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.2s"}}>
+          <div key={i} onClick={()=>toggle(i)} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 0",borderBottom:i<recipe.ingredients.length-1?"1px solid "+C.border:"none",cursor:"pointer",opacity:checked[i]?0.5:1,transition:"all 0.25s"}}>
+            <div style={{width:24,height:24,borderRadius:6,flexShrink:0,border:"2px solid "+(checked[i]?C.green:C.border),background:checked[i]?C.green:"transparent",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.2s"}}>
               {checked[i] && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><polyline points="4 12 10 18 20 6"/></svg>}
             </div>
-            <span style={{fontWeight:600,fontSize:13,color:C.accent,minWidth:65,textAlign:"right",flexShrink:0}}>{scale(ing.amount)}{ing.unit ? ` ${ing.unit}` : ""}</span>
-            <span style={{fontSize:14,flex:1,textDecoration:checked[i]?"line-through":"none",color:checked[i]?C.textLight:C.text}}>{ing.name}</span>
+            <span style={{fontFamily:"'DM Sans',sans-serif",fontWeight:600,fontSize:13,color:C.accent,minWidth:65,textAlign:"right",flexShrink:0}}>{scale(ing.amount)}{ing.unit?" "+ing.unit:""}</span>
+            <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:14,flex:1,textDecoration:checked[i]?"line-through":"none",color:checked[i]?C.textLight:C.text}}>{ing.name}</span>
           </div>
         ))}
 
         {/* Zusammenfassung */}
         <div style={{display:"flex",gap:10,padding:14,background:C.legendBg,borderRadius:10,marginTop:12,marginBottom:32,justifyContent:"center",flexWrap:"wrap"}}>
-          <span style={{...chip,background:C.greenLight,color:"#2D6B3F"}}>● {haveCount} vorhanden</span>
-          <span style={{...chip,background:C.orangeLight,color:"#9A5A10"}}>● {buyCount} einkaufen</span>
+          <span style={{...chipSt,background:C.greenLight,color:"#2D6B3F"}}>● {haveCount} vorhanden</span>
+          <span style={{...chipSt,background:C.orangeLight,color:"#9A5A10"}}>● {buyCount} einkaufen</span>
         </div>
 
         {/* Zubereitung */}
-        <h2 style={secT}>🍳 Zubereitung</h2>
+        <h2 style={secTitle}>🍳 Zubereitung</h2>
         {recipe.steps?.map((step,i) => (
           <div key={i} style={{display:"flex",gap:14,marginBottom:22}}>
-            <div style={{width:30,height:30,borderRadius:"50%",background:C.accent,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0,marginTop:2}}>{i+1}</div>
+            <div style={{width:30,height:30,borderRadius:"50%",background:C.accent,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:13,flexShrink:0,marginTop:2,fontFamily:"'DM Sans',sans-serif"}}>{i+1}</div>
             <div style={{flex:1}}>
-              <p style={{fontSize:14,lineHeight:1.6,margin:0}}>{step.text}</p>
+              <p style={{fontFamily:"'DM Sans',sans-serif",fontSize:14,lineHeight:1.6,margin:0}}>{step.text}</p>
               {step.timer && (
-                <div onClick={() => toggleTimer(i,step.timer)} style={{display:"inline-flex",alignItems:"center",gap:8,padding:"7px 14px",borderRadius:8,marginTop:8,cursor:"pointer",userSelect:"none",
-                  ...(timers[i]?.done?{background:C.green,color:"#fff"}:timers[i]?.running?{background:C.accent,color:"#fff"}:{background:C.timerBg,border:`1px solid ${C.accentLight}`})}}>
+                <div onClick={()=>toggleTimer(i,step.timer)} style={{
+                  display:"inline-flex",alignItems:"center",gap:8,padding:"7px 14px",borderRadius:8,marginTop:8,cursor:"pointer",userSelect:"none",transition:"all 0.2s",
+                  ...(timers[i]?.done ? {background:C.green,color:"#fff"} : timers[i]?.running ? {background:C.accent,color:"#fff"} : {background:C.timerBg,border:"1px solid "+C.accentLight}),
+                }}>
                   <span>⏱</span>
-                  <span style={{fontWeight:700,fontSize:14,fontVariantNumeric:"tabular-nums"}}>{timers[i]?fmt(timers[i].remaining):fmt(step.timer)}</span>
-                  <span style={{fontSize:11,opacity:0.8}}>{timers[i]?.done?"Fertig! ✓":timers[i]?.running?"läuft…":"Timer starten"}</span>
+                  <span style={{fontWeight:700,fontSize:14,fontVariantNumeric:"tabular-nums",fontFamily:"'DM Sans',sans-serif"}}>{timers[i]?fmtTime(timers[i].remaining):fmtTime(step.timer)}</span>
+                  <span style={{fontSize:11,opacity:0.8,fontFamily:"'DM Sans',sans-serif"}}>{timers[i]?.done?"Fertig! ✓":timers[i]?.running?"läuft…":"Timer starten"}</span>
                 </div>
               )}
             </div>
@@ -361,26 +360,26 @@ function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
 
         {/* Tipps */}
         {recipe.tips && (
-          <div style={{background:C.tipBg,borderLeft:`4px solid ${C.green}`,borderRadius:"0 12px 12px 0",padding:"18px 22px",marginTop:28}}>
-            <div style={{fontWeight:700,fontSize:13,color:C.green,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>💡 Tipps</div>
-            <p style={{fontSize:13,lineHeight:1.6,color:C.textLight,margin:0}}>{recipe.tips}</p>
+          <div style={{background:C.tipBg,borderLeft:"4px solid "+C.green,borderRadius:"0 12px 12px 0",padding:"18px 22px",marginTop:28}}>
+            <div style={{fontFamily:"'DM Sans',sans-serif",fontWeight:700,fontSize:13,color:C.green,textTransform:"uppercase",letterSpacing:0.8,marginBottom:8}}>💡 Tipps</div>
+            <p style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,lineHeight:1.6,color:C.textLight,margin:0}}>{recipe.tips}</p>
           </div>
         )}
 
         {/* Eiweiß-Info */}
         {recipe.proteinInfo && (
           <div style={{background:C.greenLight+"44",borderRadius:12,padding:"14px 18px",marginTop:16}}>
-            <span style={{fontSize:13,color:C.green}}>💪 <strong>Eiweiß-Info:</strong> {recipe.proteinInfo}</span>
+            <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:13,color:C.green}}>💪 <strong>Eiweiß-Info:</strong> {recipe.proteinInfo}</span>
           </div>
         )}
 
         {/* Nährwerte */}
         {recipe.nutrition && (
           <div style={{display:"flex",gap:6,padding:18,background:C.legendBg,borderRadius:14,marginTop:24,justifyContent:"space-around",flexWrap:"wrap"}}>
-            {[["kcal","KCAL"],["protein","EIWEIẞ"],["fat","FETT"],["carbs","KH"],["fiber","BALLAST."]].filter(([k])=>recipe.nutrition[k]).map(([k,l])=>(
+            {[[recipe.nutrition.kcal,"KCAL"],[recipe.nutrition.protein,"EIWEIẞ"],[recipe.nutrition.fat,"FETT"],[recipe.nutrition.carbs,"KH"],[recipe.nutrition.fiber,"BALLAST."]].filter(([v])=>v).map(([v,l])=>(
               <div key={l} style={{textAlign:"center"}}>
-                <div style={{fontFamily:"'DM Serif Display',serif",fontSize:"1.1rem",color:C.accent}}>{recipe.nutrition[k]}</div>
-                <div style={{fontSize:10,color:C.textLight,letterSpacing:0.5}}>{l}</div>
+                <div style={{fontFamily:"'DM Serif Display',serif",fontSize:"1.1rem",color:C.accent}}>{v}</div>
+                <div style={{fontFamily:"'DM Sans',sans-serif",fontSize:10,color:C.textLight,letterSpacing:0.5}}>{l}</div>
               </div>
             ))}
           </div>
@@ -388,109 +387,125 @@ function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
 
         {/* Buttons */}
         <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:32}}>
-          <button onClick={() => onPrintRecipe(recipe,checked,portions)} style={aBtn(C.accent)}>📄 Rezept-PDF herunterladen</button>
-          <button onClick={() => onPrintList(recipe,checked,portions)} style={aBtn(C.orange)}>🛒 Einkaufsliste herunterladen</button>
-          <button onClick={onBack} style={{...aBtn(C.card),color:C.accent,border:`2px solid ${C.accent}`}}>🔍 Neues Rezept suchen</button>
+          <button onClick={()=>onPrintRecipe(recipe,checked,portions)} style={actBtn(C.accent)}>📄 Rezept-PDF herunterladen</button>
+          <button onClick={()=>onPrintList(recipe,checked,portions)} style={actBtn(C.orange)}>🛒 Einkaufsliste herunterladen</button>
+          <button onClick={onBack} style={{...actBtn(C.card),color:C.accent,border:"2px solid "+C.accent}}>🔍 Neues Rezept suchen</button>
         </div>
       </div>
     </div>
   );
 }
 
-// ==================== PDF BUILDERS ====================
+// ==================== PDF / DOWNLOAD ====================
+function downloadHTML(html, filename) {
+  const blob = new Blob([html], {type:"text/html;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
 function buildRecipePDF(recipe, checked, portions) {
-  const sc = amt => { if(!amt) return ""; const s=(amt/(recipe.servings||4))*portions; if(s===Math.floor(s)) return s.toString(); return (Math.round(s*4)/4).toString(); };
+  const sc = (amt) => { if(!amt) return ""; const s=(amt/(recipe.servings||4))*portions; if(s===Math.floor(s)) return s.toString(); return (Math.round(s*4)/4).toString(); };
   const ings = recipe.ingredients.map((ing,i) => {
-    const h = checked[i];
-    return `<tr style="opacity:${h?0.5:1}"><td style="padding:6px 8px;text-align:center;font-size:18px">${h?"☑":"☐"}</td><td style="padding:6px 8px;text-align:right;font-weight:600;color:#D4654A;white-space:nowrap">${sc(ing.amount)}${ing.unit?" "+ing.unit:""}</td><td style="padding:6px 8px;${h?"text-decoration:line-through;color:#999":""}">${ing.name}</td><td style="padding:6px 8px;font-size:12px;color:#888">${h?"vorhanden":"einkaufen"}</td></tr>`;
+    const have = checked[i];
+    return '<tr style="opacity:'+(have?0.5:1)+'"><td style="padding:6px 8px;text-align:center;font-size:18px">'+(have?"☑":"☐")+'</td><td style="padding:6px 8px;text-align:right;font-weight:600;color:#D4654A;white-space:nowrap">'+sc(ing.amount)+(ing.unit?" "+ing.unit:"")+'</td><td style="padding:6px 8px;'+(have?"text-decoration:line-through;color:#999":"")+'">'+ing.name+'</td><td style="padding:6px 8px;font-size:12px;color:#888">'+(have?"vorhanden":"einkaufen")+'</td></tr>';
   }).join("");
-  const steps = recipe.steps?.map(s => `<li style="margin-bottom:10px;line-height:1.6">${s.text}${s.timer?` <em style="color:#E8913A">(${Math.floor(s.timer/60)} Min.)</em>`:""}</li>`).join("")||"";
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${recipe.name}</title><style>@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap');body{font-family:'DM Sans',sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#3B2F2F}h1{font-family:'DM Serif Display',serif;color:#D4654A;margin-bottom:4px}h2{font-family:'DM Serif Display',serif;margin-top:28px}table{width:100%;border-collapse:collapse}tr{border-bottom:1px solid #E8DDD5}@media print{body{padding:12px}}</style></head><body><h1>${recipe.name}</h1><p style="color:#7A6B6B;font-size:14px">${recipe.time||""} · ${recipe.difficulty||""} · ${portions} Portionen</p><h2>Zutaten</h2><table>${ings}</table><h2>Zubereitung</h2><ol style="padding-left:20px;font-size:14px">${steps}</ol>${recipe.tips?`<div style="background:#F0F7F1;border-left:4px solid #5A9E6F;padding:14px 18px;border-radius:0 10px 10px 0;margin-top:24px"><strong style="color:#5A9E6F">💡 Tipps:</strong><br><span style="font-size:13px;color:#7A6B6B">${recipe.tips}</span></div>`:""}<p style="text-align:center;font-size:11px;color:#aaa;margin-top:32px">Erstellt mit Rezept-Finder</p></body></html>`;
+  const steps = (recipe.steps||[]).map((s,i) => '<li style="margin-bottom:10px;line-height:1.6">'+s.text+(s.timer?' <em style="color:#E8913A">('+Math.floor(s.timer/60)+' Min.)</em>':"")+'</li>').join("");
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+recipe.name+'</title><style>@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap");body{font-family:"DM Sans",sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#3B2F2F}h1{font-family:"DM Serif Display",serif;color:#D4654A;margin-bottom:4px}h2{font-family:"DM Serif Display",serif;margin-top:28px}table{width:100%;border-collapse:collapse}tr{border-bottom:1px solid #E8DDD5}@media print{body{padding:12px}}</style></head><body><h1>'+recipe.name+'</h1><p style="color:#7A6B6B;font-size:14px">'+(recipe.time||"")+" · "+(recipe.difficulty||"")+" · "+portions+' Portionen</p><h2>Zutaten</h2><table>'+ings+'</table><h2>Zubereitung</h2><ol style="padding-left:20px;font-size:14px">'+steps+'</ol>'+(recipe.tips?'<div style="background:#F0F7F1;border-left:4px solid #5A9E6F;padding:14px 18px;border-radius:0 10px 10px 0;margin-top:24px"><strong style="color:#5A9E6F">💡 Tipps:</strong><br><span style="font-size:13px;color:#7A6B6B">'+recipe.tips+'</span></div>':"")+'<p style="text-align:center;font-size:11px;color:#aaa;margin-top:32px">Erstellt mit Rezept-Finder</p></body></html>';
 }
 
 function buildShoppingPDF(recipe, checked, portions) {
-  const sc = amt => { if(!amt) return ""; const s=(amt/(recipe.servings||4))*portions; if(s===Math.floor(s)) return s.toString(); return (Math.round(s*4)/4).toString(); };
+  const sc = (amt) => { if(!amt) return ""; const s=(amt/(recipe.servings||4))*portions; if(s===Math.floor(s)) return s.toString(); return (Math.round(s*4)/4).toString(); };
   const toBuy = recipe.ingredients.filter((_,i) => !checked[i]);
-  if (!toBuy.length) return null;
-  const rows = toBuy.map(ing => `<tr><td style="padding:8px 10px;font-size:20px">☐</td><td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">${sc(ing.amount)}${ing.unit?" "+ing.unit:""}</td><td style="padding:8px 10px;font-size:15px">${ing.name}</td></tr>`).join("");
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Einkaufsliste – ${recipe.name}</title><style>@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap');body{font-family:'DM Sans',sans-serif;max-width:500px;margin:0 auto;padding:24px;color:#3B2F2F}h1{font-family:'DM Serif Display',serif;color:#E8913A;font-size:1.4rem}table{width:100%;border-collapse:collapse}tr{border-bottom:1px solid #E8DDD5}@media print{body{padding:12px}}</style></head><body><h1>🛒 Einkaufsliste</h1><p style="color:#7A6B6B;font-size:13px">für: ${recipe.name} (${portions} Portionen) · ${toBuy.length} Artikel</p><table>${rows}</table><p style="text-align:center;font-size:11px;color:#aaa;margin-top:40px">Erstellt mit Rezept-Finder</p></body></html>`;
+  if(toBuy.length===0) return null;
+  const rows = toBuy.map(ing => '<tr><td style="padding:8px 10px;font-size:20px">☐</td><td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">'+sc(ing.amount)+(ing.unit?" "+ing.unit:"")+'</td><td style="padding:8px 10px;font-size:15px">'+ing.name+'</td></tr>').join("");
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Einkaufsliste – '+recipe.name+'</title><style>@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap");body{font-family:"DM Sans",sans-serif;max-width:500px;margin:0 auto;padding:24px;color:#3B2F2F}h1{font-family:"DM Serif Display",serif;color:#E8913A;font-size:1.4rem}table{width:100%;border-collapse:collapse}tr{border-bottom:1px solid #E8DDD5}@media print{body{padding:12px}}</style></head><body><h1>🛒 Einkaufsliste</h1><p style="color:#7A6B6B;font-size:13px">für: '+recipe.name+' ('+portions+' Portionen) · '+toBuy.length+' Artikel</p><table>'+rows+'</table><p style="text-align:center;font-size:11px;color:#aaa;margin-top:40px">Erstellt mit Rezept-Finder</p></body></html>';
 }
 
 // ==================== MAIN APP ====================
 function App() {
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("rf_api_key") || "");
-  const [screen, setScreen] = useState(() => apiKey ? "search" : "apikey");
+  const [apiKey, setApiKey] = useState(() => {
+    try { return localStorage.getItem("rf_apikey") || ""; } catch(e) { return ""; }
+  });
+  const [screen, setScreen] = useState(apiKey ? "search" : "apikey");
   const [suggestions, setSuggestions] = useState([]);
   const [recipe, setRecipe] = useState(null);
   const [error, setError] = useState(null);
-  const [loadingMessages, setLoadingMessages] = useState(LOAD_SEARCH);
+  const [loadMsg, setLoadMsg] = useState(LOAD_SEARCH);
+
+  const saveKey = (k) => {
+    try { localStorage.setItem("rf_apikey", k); } catch(e) {}
+    setApiKey(k); setScreen("search");
+  };
 
   const doSearch = async (query, image, maxTime, cuisine, diet) => {
-    setScreen("loading"); setLoadingMessages(LOAD_SEARCH); setError(null);
+    setScreen("loading"); setLoadMsg(LOAD_SEARCH); setError(null);
     try {
       const filters = [];
-      if (maxTime) filters.push(`Maximale Zubereitungszeit: ${maxTime} Minuten.`);
-      if (cuisine) filters.push(`Küche/Region: ${cuisine}.`);
-      if (diet) filters.push(`Ernährungsform: ${diet}. Nur Rezepte mit ${diet==="Fisch"?"Fisch (kein Fleisch)":diet==="Fleisch"?"Fleisch":diet==="Vegetarisch"?"vegetarischen Zutaten (kein Fisch, kein Fleisch)":"veganen Zutaten (keine tierischen Produkte)"}.`);
-      const filterText = filters.length ? `\nWICHTIGE FILTER: ${filters.join(" ")} Halte dich strikt daran.` : "";
+      if(maxTime) filters.push("Maximale Zubereitungszeit: "+maxTime+" Minuten.");
+      if(cuisine) filters.push("Küche/Region: "+cuisine+".");
+      if(diet) filters.push("Ernährungsform: "+diet+". Nur Rezepte mit "+(diet==="Fisch"?"Fisch (kein Fleisch)":diet==="Fleisch"?"Fleisch":diet==="Vegetarisch"?"vegetarischen Zutaten (kein Fisch, kein Fleisch)":"veganen Zutaten (keine tierischen Produkte)")+".");
+      const filterText = filters.length>0?"\nWICHTIGE FILTER: "+filters.join(" ")+" Halte dich strikt daran.":"";
 
-      const sysPrompt = `Du bist ein Rezept-Experte. Suche im Internet nach 3 passenden Rezepten basierend auf der Anfrage.${filterText}\nAchte IMMER auf vollständige Eiweißbausteine (essenzielle Aminosäuren) und schlage ggf. Ergänzungen vor.\nAntworte NUR mit einem JSON-Array (keine Erklärung davor/danach), Format:\n[{"name":"Rezeptname","description":"Kurzbeschreibung 2-3 Sätze","time":"30 Min.","difficulty":"Einfach","nutrition":{"kcal":"350","protein":"22g","fat":"14g","carbs":"30g"},"proteinInfo":"Kichererbsen + Ei = vollständiges Eiweiß","source":"website.de"}]\nAlle Texte auf Deutsch. Nährwerte pro Portion schätzen.`;
+      const sysPrompt = 'Du bist ein Rezept-Experte. Suche im Internet nach 3 passenden Rezepten basierend auf der Anfrage.'+filterText+'\nAchte IMMER auf vollständige Eiweißbausteine (essenzielle Aminosäuren) und schlage ggf. Ergänzungen vor.\nAntworte NUR mit einem JSON-Array (keine Erklärung davor/danach), Format:\n[{"name":"Rezeptname","description":"Kurzbeschreibung 2-3 Sätze","time":"30 Min.","difficulty":"Einfach","nutrition":{"kcal":"350","protein":"22g","fat":"14g","carbs":"30g"},"proteinInfo":"Kichererbsen + Ei = vollständiges Eiweiß","source":"website.de"}]\nAlle Texte auf Deutsch. Nährwerte pro Portion schätzen.';
 
       const userContent = [];
-      if (image) userContent.push({type:"image",source:{type:"base64",media_type:image.mediaType,data:image.base64}});
-      const textPart = query || (image ? "Lies dieses Rezeptfoto und schlage 3 Varianten vor." : "Schlage 3 proteinreiche Rezepte vor.");
-      const extras = [maxTime?`Maximal ${maxTime} Minuten.`:"",cuisine?`Küche: ${cuisine}.`:"",diet?`Ernährung: ${diet}.`:""].filter(Boolean).join(" ");
-      userContent.push({type:"text",text:textPart+(extras?" "+extras:"")});
+      if(image) userContent.push({type:"image",source:{type:"base64",media_type:image.mediaType,data:image.base64}});
+      userContent.push({type:"text",text: (query||(image?"Lies dieses Rezeptfoto und schlage 3 Varianten vor.":"Schlage 3 proteinreiche Rezepte vor."))+(maxTime?" Maximal "+maxTime+" Minuten Zubereitungszeit.":"")+(cuisine?" Küche: "+cuisine+".":"")+(diet?" Ernährung: "+diet+".":"")});
 
       const raw = await callClaude(apiKey, sysPrompt, userContent, true);
       const data = extractJSON(raw);
-      setSuggestions((Array.isArray(data)?data:[data]).slice(0,3));
+      const arr = Array.isArray(data)?data:[data];
+      setSuggestions(arr.slice(0,3));
       setScreen("suggestions");
-    } catch(e) { setError(e.message); setScreen("search"); }
+    } catch(e) {
+      setError(e.message);
+      setScreen("search");
+    }
   };
 
-  const doSelectRecipe = async (suggestion) => {
-    setScreen("loadingRecipe"); setLoadingMessages(LOAD_RECIPE); setError(null);
+  const doSelect = async (sug) => {
+    setScreen("loadingRecipe"); setLoadMsg(LOAD_RECIPE); setError(null);
     try {
-      const sysPrompt = `Du bist ein Rezept-Experte. Erstelle ein vollständiges Rezept als JSON basierend auf dem gewählten Vorschlag.\nSuche im Internet nach dem genauen Rezept und gib alle Details zurück.\nAntworte NUR mit einem JSON-Objekt:\n{"name":"Rezeptname","tags":["Proteinreich","Vegetarisch"],"time":"30 Min.","difficulty":"Einfach","servings":4,"ingredients":[{"amount":2,"unit":"EL","name":"Olivenöl"},{"amount":0,"unit":"","name":"Salz nach Geschmack"}],"steps":[{"text":"Schritt...","timer":null},{"text":"10 Min. köcheln","timer":600}],"tips":"Tipp-Text oder null","proteinInfo":"Info zu Eiweißkombination","nutrition":{"kcal":"350","protein":"22g","fat":"14g","carbs":"30g","fiber":"8g"}}\nEinheiten: EL, TL, g, Stk., Bund, Dose, ml. Timer in Sekunden. Alles auf Deutsch.`;
-      const raw = await callClaude(apiKey, sysPrompt, [{type:"text",text:`Erstelle das vollständige Rezept für: "${suggestion.name}". Beschreibung: ${suggestion.description}. Quelle: ${suggestion.source||"Internet"}`}], true);
+      const sysPrompt = 'Du bist ein Rezept-Experte. Erstelle ein vollständiges Rezept als JSON basierend auf dem gewählten Vorschlag.\nSuche im Internet nach dem genauen Rezept und gib alle Details zurück.\nAntworte NUR mit einem JSON-Objekt:\n{"name":"Rezeptname","tags":["Proteinreich","Vegetarisch"],"time":"30 Min.","difficulty":"Einfach","servings":4,"ingredients":[{"amount":2,"unit":"EL","name":"Olivenöl"},{"amount":0,"unit":"","name":"Salz nach Geschmack"}],"steps":[{"text":"Schritt...","timer":null},{"text":"10 Min. köcheln","timer":600}],"tips":"Tipp-Text oder null","proteinInfo":"Info zu Eiweißkombination","nutrition":{"kcal":"350","protein":"22g","fat":"14g","carbs":"30g","fiber":"8g"}}\nEinheiten: EL, TL, g, Stk., Bund, Dose, ml. Timer in Sekunden. Alles auf Deutsch.';
+      const raw = await callClaude(apiKey, sysPrompt, [{type:"text",text:'Erstelle das vollständige Rezept für: "'+sug.name+'". Beschreibung: '+sug.description+'. Quelle: '+(sug.source||"Internet")}], true);
       const data = extractJSON(raw);
       setRecipe(data);
       setScreen("recipe");
     } catch(e) { setError(e.message); setScreen("suggestions"); }
   };
 
-  const handlePrintRecipe = (rec,checked,portions) => {
-    const html = buildRecipePDF(rec,checked,portions);
-    downloadHTML(html, `${rec.name.replace(/[^a-zA-ZäöüÄÖÜß0-9 _-]/g,"").trim()||"Rezept"}.html`);
+  const handlePrintRecipe = (rec, checked, portions) => {
+    const html = buildRecipePDF(rec, checked, portions);
+    const safeName = rec.name.replace(/[^a-zA-ZäöüÄÖÜß0-9 _-]/g,"").trim();
+    downloadHTML(html, (safeName||"Rezept")+".html");
   };
-  const handlePrintList = (rec,checked,portions) => {
-    const html = buildShoppingPDF(rec,checked,portions);
-    if (!html) { alert("Alle Zutaten sind als vorhanden markiert — nichts einzukaufen!"); return; }
-    downloadHTML(html, `Einkaufsliste – ${rec.name.replace(/[^a-zA-ZäöüÄÖÜß0-9 _-]/g,"").trim()||"Rezept"}.html`);
+  const handlePrintList = (rec, checked, portions) => {
+    const html = buildShoppingPDF(rec, checked, portions);
+    if(!html){ alert("Alle Zutaten sind als vorhanden markiert — nichts einzukaufen!"); return; }
+    const safeName = rec.name.replace(/[^a-zA-ZäöüÄÖÜß0-9 _-]/g,"").trim();
+    downloadHTML(html, "Einkaufsliste – "+(safeName||"Rezept")+".html");
   };
-
-  const handleChangeKey = () => { localStorage.removeItem("rf_api_key"); setApiKey(""); setScreen("apikey"); };
-  const handleSaveKey = k => { setApiKey(k); setScreen("search"); };
 
   return (
     <div style={{minHeight:"100vh",background:C.bg,fontFamily:"'DM Sans',sans-serif"}}>
       {error && (
-        <div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:100,background:"#FEE",border:"1px solid #D44",borderRadius:12,padding:"12px 20px",fontSize:13,color:"#922",maxWidth:500,boxShadow:"0 4px 20px rgba(0,0,0,0.1)"}}>
+        <div style={{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:100,background:"#FEE",border:"1px solid #D44",borderRadius:12,padding:"12px 20px",fontFamily:"'DM Sans',sans-serif",fontSize:13,color:"#922",maxWidth:500,boxShadow:"0 4px 20px rgba(0,0,0,0.1)"}}>
           <strong>Fehler:</strong> {error}
-          <button onClick={() => setError(null)} style={{marginLeft:12,background:"none",border:"none",color:"#922",cursor:"pointer",fontWeight:700}}>✕</button>
+          <button onClick={()=>setError(null)} style={{marginLeft:12,background:"none",border:"none",color:"#922",cursor:"pointer",fontWeight:700}}>✕</button>
         </div>
       )}
-      {screen === "apikey" && <ApiKeyScreen onSave={handleSaveKey}/>}
-      {screen === "search" && <SearchScreen onSearch={doSearch} onChangeKey={handleChangeKey}/>}
-      {(screen === "loading" || screen === "loadingRecipe") && <LoadingScreen messages={loadingMessages}/>}
-      {screen === "suggestions" && <SuggestionScreen suggestions={suggestions} onSelect={doSelectRecipe} onBack={() => setScreen("search")}/>}
-      {screen === "recipe" && recipe && <RecipeCard recipe={recipe} onBack={() => setScreen("search")} onPrintRecipe={handlePrintRecipe} onPrintList={handlePrintList}/>}
+      {screen==="apikey" && <ApiKeyScreen onSave={saveKey} />}
+      {screen==="search" && <SearchScreen onSearch={doSearch} />}
+      {(screen==="loading"||screen==="loadingRecipe") && <LoadingScreen messages={loadMsg} />}
+      {screen==="suggestions" && <SuggestionScreen suggestions={suggestions} onSelect={doSelect} onBack={()=>setScreen("search")} />}
+      {screen==="recipe" && recipe && <RecipeCard recipe={recipe} onBack={()=>setScreen("search")} onPrintRecipe={handlePrintRecipe} onPrintList={handlePrintList} />}
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
 </html>
