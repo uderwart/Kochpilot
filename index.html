@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Rezept-Finder</title>
+<title>Kochpilot</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
@@ -97,8 +97,8 @@ function ApiKeyScreen({ onSave }) {
   const [key, setKey] = useState("");
   return (
     <div style={{maxWidth:480,margin:"0 auto",padding:"60px 24px",textAlign:"center"}}>
-      <div style={{fontSize:42,marginBottom:8}}>🔑</div>
-      <h1 style={{fontFamily:"'DM Serif Display',serif",fontSize:"1.8rem",color:C.text,marginBottom:8}}>Rezept-Finder</h1>
+      <div style={{fontSize:42,marginBottom:8}}>🧭</div>
+      <h1 style={{fontFamily:"'DM Serif Display',serif",fontSize:"1.8rem",color:C.text,marginBottom:8}}>Kochpilot</h1>
       <p style={{fontFamily:"'DM Sans',sans-serif",color:C.textLight,fontSize:14,marginBottom:32,lineHeight:1.5}}>
         Bitte gib deinen Claude API-Key ein.<br/>
         <span style={{fontSize:12}}>Der Key bleibt nur in deinem Browser gespeichert und wird nirgendwo hin gesendet außer an die Anthropic API.</span>
@@ -129,7 +129,7 @@ function ApiKeyScreen({ onSave }) {
 }
 
 // ==================== SEARCH ====================
-function SearchScreen({ onSearch }) {
+function SearchScreen({ onSearch, onLoadJSON }) {
   const [query, setQuery] = useState("");
   const [maxTime, setMaxTime] = useState("");
   const [cuisine, setCuisine] = useState("");
@@ -159,7 +159,7 @@ function SearchScreen({ onSearch }) {
     <div style={{maxWidth:600,margin:"0 auto",padding:"40px 24px"}}>
       <div style={{textAlign:"center",marginBottom:40}}>
         <div style={{fontSize:42,marginBottom:8}}>🍳</div>
-        <h1 style={{fontFamily:"'DM Serif Display',serif",fontSize:"2rem",color:C.text,margin:0,lineHeight:1.2}}>Rezept-Finder</h1>
+        <h1 style={{fontFamily:"'DM Serif Display',serif",fontSize:"2rem",color:C.text,margin:0,lineHeight:1.2}}>Kochpilot</h1>
         <p style={{fontFamily:"'DM Sans',sans-serif",color:C.textLight,fontSize:14,marginTop:8}}>Finde das perfekte Rezept — proteinoptimiert und auf dich zugeschnitten</p>
       </div>
 
@@ -226,6 +226,20 @@ function SearchScreen({ onSearch }) {
         transition:"all 0.25s",boxShadow:canSubmit?"0 4px 20px rgba(212,101,74,0.3)":"none"}}>
         🔍 Rezepte suchen
       </button>
+
+      {/* Gespeichertes Rezept laden */}
+      <div style={{textAlign:"center",marginTop:20}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+          <div style={{flex:1,height:1,background:C.border}} />
+          <span style={{fontFamily:"'DM Sans',sans-serif",fontSize:12,color:C.textLight}}>oder</span>
+          <div style={{flex:1,height:1,background:C.border}} />
+        </div>
+        <button onClick={onLoadJSON}
+          style={{width:"100%",padding:"14px 24px",fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:600,
+          background:C.card,color:C.green,border:"2px solid "+C.green,borderRadius:14,cursor:"pointer",transition:"all 0.25s"}}>
+          📂 Gespeichertes Rezept laden
+        </button>
+      </div>
     </div>
   );
 }
@@ -269,12 +283,17 @@ const chipSt = {fontFamily:"'DM Sans',sans-serif",fontSize:12,fontWeight:600,pad
 const portBtn = {width:38,height:38,borderRadius:"50%",border:"2px solid "+C.accent,background:"transparent",color:C.accent,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',sans-serif"};
 const actBtn = (bg) => ({width:"100%",padding:"14px 24px",fontFamily:"'DM Sans',sans-serif",fontSize:15,fontWeight:600,background:bg,color:"#fff",border:"none",borderRadius:12,cursor:"pointer",transition:"all 0.2s"});
 
-function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
+function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList, onSaveJSON, apiKey }) {
   const base = recipe.servings || 4;
   const [portions, setPortions] = useState(base);
   const [checked, setChecked] = useState(() => recipe.ingredients.map(() => false));
   const [timers, setTimers] = useState({});
   const timerRefs = useRef({});
+  const [notes, setNotes] = useState(recipe.notes || "");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef(null);
 
   const toggle = (i) => { const c=[...checked]; c[i]=!c[i]; setChecked(c); };
   const scale = (amount) => {
@@ -306,6 +325,25 @@ function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
     },1000);
   };
   const fmtTime=(s)=>Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
+
+  const askChat = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const question = chatInput.trim();
+    setChatInput("");
+    setChatMessages(prev => [...prev, {role:"user", text:question}]);
+    setChatLoading(true);
+    setTimeout(() => chatEndRef.current?.scrollIntoView({behavior:"smooth"}), 100);
+    try {
+      const recipeContext = "Rezept: "+recipe.name+"\nZutaten: "+recipe.ingredients.map(ing=>(ing.amount||"")+" "+(ing.unit||"")+" "+ing.name).join(", ")+"\nZubereitung: "+(recipe.steps||[]).map((s,i)=>(i+1)+". "+s.text).join(" ");
+      const sysPrompt = "Du bist der Kochpilot — ein freundlicher Kochassistent. Der Nutzer kocht gerade folgendes Rezept:\n\n"+recipeContext+"\n\nBeantworte die Frage des Nutzers zur Zubereitung, zu Zutaten, Techniken oder Varianten. Nutze Web-Search um verlässliche Informationen aus seriösen Kochquellen zu finden. Antworte auf Deutsch, kurz und praktisch (max. 3-4 Sätze). Gib wenn möglich die Quelle an.";
+      const raw = await callClaude(apiKey, sysPrompt, [{type:"text",text:question}], true);
+      setChatMessages(prev => [...prev, {role:"assistant", text:raw}]);
+    } catch(e) {
+      setChatMessages(prev => [...prev, {role:"assistant", text:"Fehler: "+e.message+". Bitte nochmal versuchen."}]);
+    }
+    setChatLoading(false);
+    setTimeout(() => chatEndRef.current?.scrollIntoView({behavior:"smooth"}), 100);
+  };
 
   return (
     <div style={{maxWidth:680,margin:"0 auto",background:C.card,minHeight:"100vh",boxShadow:"0 0 60px rgba(60,40,30,0.08)"}}>
@@ -404,8 +442,68 @@ function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
           </div>
         )}
 
+        {/* Notizen */}
+        <div style={{marginTop:24}}>
+          <h2 style={secTitle}>📝 Meine Notizen</h2>
+          <textarea value={notes} onChange={e=>setNotes(e.target.value)}
+            placeholder="z. B. „Nächstes Mal mehr Kreuzkümmel" oder „Uli mag's schärfer""
+            rows={3}
+            style={{width:"100%",fontFamily:"'DM Sans',sans-serif",fontSize:14,padding:"14px 16px",border:"2px solid "+C.border,borderRadius:12,resize:"vertical",outline:"none",background:C.legendBg,color:C.text,lineHeight:1.5,boxSizing:"border-box",transition:"border-color 0.2s"}} />
+        </div>
+
+        {/* Kochpilot Chat */}
+        <div style={{marginTop:28}}>
+          <h2 style={secTitle}>🧭 Frag den Kochpiloten</h2>
+          <p style={{fontFamily:"'DM Sans',sans-serif",fontSize:12,color:C.textLight,marginBottom:16,lineHeight:1.4}}>
+            Fragen zur Zubereitung, Zutaten oder Varianten — der Kochpilot sucht im Internet nach verlässlichen Antworten.
+            <br/><span style={{fontSize:11,color:C.orange}}>💡 Jede Frage kostet ca. 1–2 Cent (Claude API).</span>
+          </p>
+
+          {/* Chat-Verlauf */}
+          {chatMessages.length > 0 && (
+            <div style={{maxHeight:400,overflowY:"auto",marginBottom:16,display:"flex",flexDirection:"column",gap:12}}>
+              {chatMessages.map((msg,i) => (
+                <div key={i} style={{
+                  padding:"12px 16px",borderRadius:12,fontFamily:"'DM Sans',sans-serif",fontSize:13,lineHeight:1.6,
+                  ...(msg.role==="user"
+                    ? {background:C.accent+"18",borderLeft:"3px solid "+C.accent,color:C.text}
+                    : {background:C.tipBg,borderLeft:"3px solid "+C.green,color:C.text}),
+                }}>
+                  <div style={{fontSize:11,fontWeight:700,color:msg.role==="user"?C.accent:C.green,marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>
+                    {msg.role==="user"?"Du":"Kochpilot"}
+                  </div>
+                  {msg.text}
+                </div>
+              ))}
+              {chatLoading && (
+                <div style={{padding:"12px 16px",borderRadius:12,background:C.tipBg,borderLeft:"3px solid "+C.green,fontFamily:"'DM Sans',sans-serif",fontSize:13,color:C.textLight}}>
+                  <div style={{display:"inline-block",width:16,height:16,border:"2px solid "+C.border,borderTopColor:C.green,borderRadius:"50%",animation:"spin 0.9s linear infinite",verticalAlign:"middle",marginRight:8}} />
+                  Suche nach Antwort…
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+          )}
+
+          {/* Chat-Eingabe */}
+          <div style={{display:"flex",gap:10}}>
+            <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
+              onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&chatInput.trim()&&!chatLoading){e.preventDefault();askChat();}}}
+              placeholder="z. B. „Kann ich Kreuzkümmel ersetzen?""
+              disabled={chatLoading}
+              style={{flex:1,fontFamily:"'DM Sans',sans-serif",fontSize:14,padding:"12px 16px",border:"2px solid "+C.border,borderRadius:12,outline:"none",background:C.card,color:C.text,boxSizing:"border-box"}} />
+            <button onClick={askChat} disabled={!chatInput.trim()||chatLoading}
+              style={{padding:"12px 20px",fontFamily:"'DM Sans',sans-serif",fontSize:14,fontWeight:700,
+              background:chatInput.trim()&&!chatLoading?C.accent:C.border,color:"#fff",border:"none",borderRadius:12,cursor:chatInput.trim()&&!chatLoading?"pointer":"not-allowed",
+              transition:"all 0.2s",whiteSpace:"nowrap"}}>
+              Fragen
+            </button>
+          </div>
+        </div>
+
         {/* Buttons */}
         <div style={{display:"flex",flexDirection:"column",gap:10,marginTop:32}}>
+          <button onClick={()=>onSaveJSON(recipe,notes,portions)} style={actBtn(C.green)}>💾 Rezept speichern (JSON)</button>
           <button onClick={()=>onPrintRecipe(recipe,checked,portions)} style={actBtn(C.accent)}>📄 Rezept-PDF herunterladen</button>
           <button onClick={()=>onPrintList(recipe,checked,portions)} style={actBtn(C.orange)}>🛒 Einkaufsliste herunterladen</button>
           <button onClick={onBack} style={{...actBtn(C.card),color:C.accent,border:"2px solid "+C.accent}}>🔍 Neues Rezept suchen</button>
@@ -413,6 +511,38 @@ function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
       </div>
     </div>
   );
+}
+
+// ==================== JSON SAVE/LOAD ====================
+function downloadJSON(recipe, notes, portions) {
+  const data = { ...recipe, notes: notes || "", savedPortions: portions, savedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const safeName = recipe.name.replace(/[^a-zA-ZäöüÄÖÜß0-9 _-]/g,"").trim();
+  a.href = url; a.download = (safeName||"Rezept")+".json"; document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function loadJSONFile() {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = ".json";
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) { reject(new Error("Keine Datei gewählt")); return; }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          if (!data.name || !data.ingredients) throw new Error("Ungültiges Rezept-Format");
+          resolve(data);
+        } catch(err) { reject(new Error("Datei konnte nicht gelesen werden: " + err.message)); }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  });
 }
 
 // ==================== PDF / DOWNLOAD ====================
@@ -431,7 +561,7 @@ function buildRecipePDF(recipe, checked, portions) {
     return '<tr style="opacity:'+(have?0.5:1)+'"><td style="padding:6px 8px;text-align:center;font-size:18px">'+(have?"☑":"☐")+'</td><td style="padding:6px 8px;text-align:right;font-weight:600;color:#D4654A;white-space:nowrap">'+sc(ing.amount)+(ing.unit?" "+ing.unit:"")+'</td><td style="padding:6px 8px;'+(have?"text-decoration:line-through;color:#999":"")+'">'+ing.name+'</td><td style="padding:6px 8px;font-size:12px;color:#888">'+(have?"vorhanden":"einkaufen")+'</td></tr>';
   }).join("");
   const steps = (recipe.steps||[]).map((s,i) => '<li style="margin-bottom:10px;line-height:1.6">'+s.text+(s.timer?' <em style="color:#E8913A">('+Math.floor(s.timer/60)+' Min.)</em>':"")+'</li>').join("");
-  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+recipe.name+'</title><style>@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap");body{font-family:"DM Sans",sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#3B2F2F}h1{font-family:"DM Serif Display",serif;color:#D4654A;margin-bottom:4px}h2{font-family:"DM Serif Display",serif;margin-top:28px}table{width:100%;border-collapse:collapse}tr{border-bottom:1px solid #E8DDD5}@media print{body{padding:12px}}</style></head><body><h1>'+recipe.name+'</h1><p style="color:#7A6B6B;font-size:14px">'+(recipe.time||"")+" · "+(recipe.difficulty||"")+" · "+portions+' Portionen</p><h2>Zutaten</h2><table>'+ings+'</table><h2>Zubereitung</h2><ol style="padding-left:20px;font-size:14px">'+steps+'</ol>'+(recipe.tips?'<div style="background:#F0F7F1;border-left:4px solid #5A9E6F;padding:14px 18px;border-radius:0 10px 10px 0;margin-top:24px"><strong style="color:#5A9E6F">💡 Tipps:</strong><br><span style="font-size:13px;color:#7A6B6B">'+recipe.tips+'</span></div>':"")+'<p style="text-align:center;font-size:11px;color:#aaa;margin-top:32px">Erstellt mit Rezept-Finder</p></body></html>';
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+recipe.name+'</title><style>@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap");body{font-family:"DM Sans",sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#3B2F2F}h1{font-family:"DM Serif Display",serif;color:#D4654A;margin-bottom:4px}h2{font-family:"DM Serif Display",serif;margin-top:28px}table{width:100%;border-collapse:collapse}tr{border-bottom:1px solid #E8DDD5}@media print{body{padding:12px}}</style></head><body><h1>'+recipe.name+'</h1><p style="color:#7A6B6B;font-size:14px">'+(recipe.time||"")+" · "+(recipe.difficulty||"")+" · "+portions+' Portionen</p><h2>Zutaten</h2><table>'+ings+'</table><h2>Zubereitung</h2><ol style="padding-left:20px;font-size:14px">'+steps+'</ol>'+(recipe.tips?'<div style="background:#F0F7F1;border-left:4px solid #5A9E6F;padding:14px 18px;border-radius:0 10px 10px 0;margin-top:24px"><strong style="color:#5A9E6F">💡 Tipps:</strong><br><span style="font-size:13px;color:#7A6B6B">'+recipe.tips+'</span></div>':"")+'<p style="text-align:center;font-size:11px;color:#aaa;margin-top:32px">Erstellt mit Kochpilot</p></body></html>';
 }
 
 function buildShoppingPDF(recipe, checked, portions) {
@@ -439,7 +569,7 @@ function buildShoppingPDF(recipe, checked, portions) {
   const toBuy = recipe.ingredients.filter((_,i) => !checked[i]);
   if(toBuy.length===0) return null;
   const rows = toBuy.map(ing => '<tr><td style="padding:8px 10px;font-size:20px">☐</td><td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">'+sc(ing.amount)+(ing.unit?" "+ing.unit:"")+'</td><td style="padding:8px 10px;font-size:15px">'+ing.name+'</td></tr>').join("");
-  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Einkaufsliste – '+recipe.name+'</title><style>@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap");body{font-family:"DM Sans",sans-serif;max-width:500px;margin:0 auto;padding:24px;color:#3B2F2F}h1{font-family:"DM Serif Display",serif;color:#E8913A;font-size:1.4rem}table{width:100%;border-collapse:collapse}tr{border-bottom:1px solid #E8DDD5}@media print{body{padding:12px}}</style></head><body><h1>🛒 Einkaufsliste</h1><p style="color:#7A6B6B;font-size:13px">für: '+recipe.name+' ('+portions+' Portionen) · '+toBuy.length+' Artikel</p><table>'+rows+'</table><p style="text-align:center;font-size:11px;color:#aaa;margin-top:40px">Erstellt mit Rezept-Finder</p></body></html>';
+  return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Einkaufsliste – '+recipe.name+'</title><style>@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap");body{font-family:"DM Sans",sans-serif;max-width:500px;margin:0 auto;padding:24px;color:#3B2F2F}h1{font-family:"DM Serif Display",serif;color:#E8913A;font-size:1.4rem}table{width:100%;border-collapse:collapse}tr{border-bottom:1px solid #E8DDD5}@media print{body{padding:12px}}</style></head><body><h1>🛒 Einkaufsliste</h1><p style="color:#7A6B6B;font-size:13px">für: '+recipe.name+' ('+portions+' Portionen) · '+toBuy.length+' Artikel</p><table>'+rows+'</table><p style="text-align:center;font-size:11px;color:#aaa;margin-top:40px">Erstellt mit Kochpilot</p></body></html>';
 }
 
 // ==================== MAIN APP ====================
@@ -495,6 +625,18 @@ function App() {
     } catch(e) { setError(e.message); setScreen("suggestions"); }
   };
 
+  const handleSaveJSON = (rec, notes, portions) => {
+    downloadJSON(rec, notes, portions);
+  };
+
+  const handleLoadJSON = async () => {
+    try {
+      const data = await loadJSONFile();
+      setRecipe(data);
+      setScreen("recipe");
+    } catch(e) { setError(e.message); }
+  };
+
   const handlePrintRecipe = (rec, checked, portions) => {
     const html = buildRecipePDF(rec, checked, portions);
     const safeName = rec.name.replace(/[^a-zA-ZäöüÄÖÜß0-9 _-]/g,"").trim();
@@ -516,10 +658,10 @@ function App() {
         </div>
       )}
       {screen==="apikey" && <ApiKeyScreen onSave={saveKey} />}
-      {screen==="search" && <SearchScreen onSearch={doSearch} />}
+      {screen==="search" && <SearchScreen onSearch={doSearch} onLoadJSON={handleLoadJSON} />}
       {(screen==="loading"||screen==="loadingRecipe") && <LoadingScreen messages={loadMsg} />}
       {screen==="suggestions" && <SuggestionScreen suggestions={suggestions} onSelect={doSelect} onBack={()=>setScreen("search")} />}
-      {screen==="recipe" && recipe && <RecipeCard recipe={recipe} onBack={()=>setScreen("search")} onPrintRecipe={handlePrintRecipe} onPrintList={handlePrintList} />}
+      {screen==="recipe" && recipe && <RecipeCard recipe={recipe} onBack={()=>setScreen("search")} onPrintRecipe={handlePrintRecipe} onPrintList={handlePrintList} onSaveJSON={handleSaveJSON} apiKey={apiKey} />}
     </div>
   );
 }
