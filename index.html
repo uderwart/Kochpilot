@@ -49,13 +49,49 @@ async function callClaude(apiKey, systemPrompt, userContent, useWebSearch = fals
 }
 
 function extractJSON(text) {
-  const m = text.match(/```json\s*([\s\S]*?)```/);
-  if (m) return JSON.parse(m[1].trim());
-  const m2 = text.match(/\{[\s\S]*\}/);
-  if (m2) return JSON.parse(m2[0]);
-  const m3 = text.match(/\[[\s\S]*\]/);
-  if (m3) return JSON.parse(m3[0]);
-  throw new Error("Kein JSON gefunden");
+  // 1. JSON-Codeblock
+  const cbMatch = text.match(/```json\s*([\s\S]*?)```/);
+  if (cbMatch) { try { return JSON.parse(cbMatch[1].trim()); } catch(e) {} }
+
+  const tryParse = str => { try { return JSON.parse(str); } catch(e) { return null; } };
+
+  // 2. Erstes vollstaendiges Array mit Klammer-Balancing
+  const arrStart = text.indexOf("[");
+  if (arrStart !== -1) {
+    let depth = 0, inStr = false, esc = false;
+    for (let i = arrStart; i < text.length; i++) {
+      const c = text[i];
+      if (esc) { esc = false; continue; }
+      if (c === "\\" && inStr) { esc = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === "[" || c === "{") depth++;
+      if (c === "]" || c === "}") {
+        depth--;
+        if (depth === 0) { const r = tryParse(text.slice(arrStart, i+1)); if (r) return r; break; }
+      }
+    }
+  }
+
+  // 3. Erstes vollstaendiges Objekt mit Klammer-Balancing
+  const objStart = text.indexOf("{");
+  if (objStart !== -1) {
+    let depth = 0, inStr = false, esc = false;
+    for (let i = objStart; i < text.length; i++) {
+      const c = text[i];
+      if (esc) { esc = false; continue; }
+      if (c === "\\" && inStr) { esc = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === "{") depth++;
+      if (c === "}") {
+        depth--;
+        if (depth === 0) { const r = tryParse(text.slice(objStart, i+1)); if (r) return r; break; }
+      }
+    }
+  }
+
+  throw new Error("Kein gueltiges JSON. Antwort: " + text.slice(0, 300));
 }
 
 // ==================== LOADING ====================
@@ -251,10 +287,21 @@ function SuggestionScreen({ suggestions, onSelect, onBack }) {
               {r.time && <span style={tagStyle}>⏱ {r.time}</span>}
               {r.difficulty && <span style={tagStyle}>{r.difficulty}</span>}
             </div>
-            {/* Nährwerte */}
-            <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
-              {[["kcal",r.nutrition?.kcal],["Eiweiß",r.nutrition?.protein],["Fett",r.nutrition?.fat],["KH",r.nutrition?.carbs],["Ballaststoffe",r.nutrition?.fiber]].map(([label,val]) => val && (
-                <span key={label} style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:600, padding:"4px 10px", borderRadius:12, background:COLORS.legendBg, color:COLORS.textLight }}>{label}: {val}</span>
+            {/* Nährwerte Vorschau */}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6, marginBottom:12 }}>
+              {[
+                ["🔥","kcal",r.nutrition?.kcal,"KCAL"],
+                ["💪","protein",r.nutrition?.protein,"Eiweiß"],
+                ["🌾","fiber",r.nutrition?.fiber,"Ballaststoffe"],
+                ["🦴","calcium",r.nutrition?.calcium,"Kalzium"],
+                ["☀️","vitaminD",r.nutrition?.vitaminD,"Vit. D"],
+                ["🧬","vitaminB12",r.nutrition?.vitaminB12,"Vit. B12"],
+              ].filter(([,,val]) => val).map(([icon,,val,label]) => (
+                <div key={label} style={{ background:COLORS.legendBg, borderRadius:10, padding:"8px 10px", textAlign:"center" }}>
+                  <div style={{ fontSize:14, marginBottom:2 }}>{icon}</div>
+                  <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:12, color:COLORS.accent }}>{val}</div>
+                  <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:COLORS.textLight }}>{label}</div>
+                </div>
               ))}
             </div>
             {/* Ernährungs-Info 60+ */}
@@ -415,23 +462,49 @@ function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
           </div>
         )}
 
-        {/* Nährwerte */}
+        {/* Nährwerte 60+ Block */}
         {recipe.nutrition && (
-          <div style={{ display:"flex", gap:6, padding:18, background:COLORS.legendBg, borderRadius:14, marginTop:24, justifyContent:"space-around", flexWrap:"wrap" }}>
-            {[
-              [recipe.nutrition.kcal,"KCAL"],
-              [recipe.nutrition.protein,"EIWEIẞ"],
-              [recipe.nutrition.fat,"FETT"],
-              [recipe.nutrition.carbs,"KH"],
-              [recipe.nutrition.fiber,"BALLAST."],
-              [recipe.nutrition.calcium,"KALZIUM"],
-              [recipe.nutrition.vitaminD,"VIT. D"],
-            ].filter(([v]) => v).map(([v,l]) => (
-              <div key={l} style={{ textAlign:"center" }}>
-                <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:"1.1rem", color:COLORS.accent }}>{v}</div>
-                <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:COLORS.textLight, letterSpacing:0.5 }}>{l}</div>
+          <div style={{ background:COLORS.legendBg, borderRadius:16, padding:20, marginTop:24 }}>
+            <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:12, color:COLORS.textLight, textTransform:"uppercase", letterSpacing:0.8, marginBottom:14 }}>
+              🥗 Nährwerte pro Portion
+            </div>
+            {/* Hauptwerte: kcal + Makros */}
+            <div style={{ display:"flex", gap:8, justifyContent:"space-around", marginBottom:16, flexWrap:"wrap" }}>
+              {[
+                [recipe.nutrition.kcal,"KCAL","#D4654A"],
+                [recipe.nutrition.protein,"EIWEIẞ","#5A9E6F"],
+                [recipe.nutrition.fat,"FETT","#7A6B6B"],
+                [recipe.nutrition.carbs,"KH","#7A6B6B"],
+              ].filter(([v]) => v).map(([v,l,col]) => (
+                <div key={l} style={{ textAlign:"center" }}>
+                  <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:"1.2rem", color:col }}>{v}</div>
+                  <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:COLORS.textLight, letterSpacing:0.5 }}>{l}</div>
+                </div>
+              ))}
+            </div>
+            {/* 60+ Schlüsselnährstoffe */}
+            <div style={{ borderTop:`1px solid ${COLORS.border}`, paddingTop:14 }}>
+              <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:600, color:COLORS.green, textTransform:"uppercase", letterSpacing:0.6, marginBottom:10 }}>
+                Schlüsselnährstoffe 60+
               </div>
-            ))}
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:8 }}>
+                {[
+                  ["🌾","Ballaststoffe",recipe.nutrition.fiber,"30 g/Tag"],
+                  ["🦴","Kalzium",recipe.nutrition.calcium,"1.000–1.200 mg"],
+                  ["☀️","Vitamin D",recipe.nutrition.vitaminD,"20 µg/Tag"],
+                  ["🧬","Vitamin B12",recipe.nutrition.vitaminB12,"4 µg/Tag"],
+                ].filter(([,,v]) => v).map(([icon,label,val,ref]) => (
+                  <div key={label} style={{ background:"#fff", borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
+                    <span style={{ fontSize:18 }}>{icon}</span>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:600, color:COLORS.text }}>{val}</div>
+                      <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:COLORS.textLight }}>{label}</div>
+                      <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:9, color:COLORS.textLight, opacity:0.7 }}>Bedarf: {ref}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -464,7 +537,20 @@ function buildRecipePrintHTML(recipe, checked, portions) {
     <td style="padding:6px 8px;font-size:12px;color:#888">${checked[i]?"vorhanden":"einkaufen"}</td>
   </tr>`).join("");
   const steps = recipe.steps?.map((s,i) => `<li style="margin-bottom:10px;line-height:1.6">${s.text}${s.timer?` <em style="color:#E8913A">(${Math.floor(s.timer/60)} Min.)</em>`:""}</li>`).join("")||"";
-  const nutr = recipe.nutrition ? `<div style="display:flex;gap:20px;margin-top:24px;padding:16px;background:#FAF5F2;border-radius:10px;justify-content:space-around;flex-wrap:wrap">${[["kcal","KCAL"],["protein","EIWEIẞ"],["fat","FETT"],["carbs","KH"],["fiber","BALLAST."],["calcium","KALZIUM"],["vitaminD","VIT. D"]].filter(([k])=>recipe.nutrition[k]).map(([k,l])=>`<div style="text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:#D4654A">${recipe.nutrition[k]}</div><div style="font-size:10px;color:#7A6B6B">${l}</div></div>`).join("")}</div>` : "";
+  const n = recipe.nutrition || {};
+  const nutr = recipe.nutrition ? `
+<div style="margin-top:24px;padding:16px;background:#FAF5F2;border-radius:10px">
+  <div style="font-size:11px;font-weight:700;color:#7A6B6B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Nährwerte pro Portion</div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+    ${[["kcal","KCAL","#D4654A"],["protein","EIWEIẞ","#5A9E6F"],["fat","FETT","#7A6B6B"],["carbs","KH","#7A6B6B"]].filter(([k])=>n[k]).map(([k,l,c])=>`<div style="text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:${c}">${n[k]}</div><div style="font-size:10px;color:#7A6B6B">${l}</div></div>`).join("")}
+  </div>
+  <div style="border-top:1px solid #E8DDD5;padding-top:12px">
+    <div style="font-size:11px;font-weight:600;color:#5A9E6F;margin-bottom:8px">Schlüsselnährstoffe 60+</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${[["🌾","fiber","Ballaststoffe","30 g/Tag"],["🦴","calcium","Kalzium","1.000–1.200 mg"],["☀️","vitaminD","Vitamin D","20 µg/Tag"],["🧬","vitaminB12","Vitamin B12","4 µg/Tag"]].filter(([,k])=>n[k]).map(([icon,k,label,ref])=>`<div style="background:#fff;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:8px"><span>${icon}</span><div><div style="font-weight:600;font-size:13px">${n[k]}</div><div style="font-size:10px;color:#7A6B6B">${label}</div><div style="font-size:9px;color:#aaa">Bedarf: ${ref}</div></div></div>`).join("")}
+    </div>
+  </div>
+</div>` : "";
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${recipe.name}</title>
 <style>@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap');
 body{font-family:'DM Sans',sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#3B2F2F}
@@ -550,11 +636,11 @@ Antworte NUR mit einem JSON-Array (keine Erklärung davor/danach):
   "description": "Kurzbeschreibung 2-3 Sätze",
   "time": "30 Min.",
   "difficulty": "Einfach",
-  "nutrition": {"kcal":"350","protein":"22g","fat":"14g","carbs":"30g","fiber":"8g","calcium":"200mg"},
+  "nutrition": {"kcal":"350","protein":"22g","fat":"14g","carbs":"30g","fiber":"8g","calcium":"200mg","vitaminD":"2µg","vitaminB12":"1,2µg"},
   "nutritionInfo60": "Hoher Kalzium- und Ballaststoffgehalt. Ergänze mit einem Glas Mineralwasser für die Flüssigkeitszufuhr.",
   "source": "website.de"
 }]
-Alle Texte auf Deutsch. Nährwerte pro Portion schätzen.`;
+Alle Texte auf Deutsch. Nährwerte pro Portion schätzen. Schätze IMMER alle Nährwerte, auch Kalzium, Vitamin D und Vitamin B12.`;
 
       const userContent = [];
       if (image) userContent.push({ type:"image", source:{ type:"base64", media_type:image.mediaType, data:image.base64 } });
@@ -582,9 +668,9 @@ Antworte NUR mit einem JSON-Objekt:
   "steps": [{"text":"Schritt...","timer":null},{"text":"10 Min. köcheln","timer":600}],
   "tips": "Tipp-Text oder null",
   "nutritionInfo60": "Max. 2-3 Sätze zur Einschätzung nach 60+-Kriterien",
-  "nutrition": {"kcal":"350","protein":"22g","fat":"14g","carbs":"30g","fiber":"8g","calcium":"200mg","vitaminD":"2µg"}
+  "nutrition": {"kcal":"350","protein":"22g","fat":"14g","carbs":"30g","fiber":"8g","calcium":"200mg","vitaminD":"2µg","vitaminB12":"1,2µg"}
 }
-Einheiten: EL, TL, g, Stk., Bund, Dose, ml. Timer in Sekunden. Alles auf Deutsch.`;
+Einheiten: EL, TL, g, Stk., Bund, Dose, ml. Timer in Sekunden. Alles auf Deutsch. Schätze IMMER alle Nährwerte, auch Kalzium, Vitamin D und Vitamin B12.`;
 
       const raw = await callClaude(apiKey, sysPrompt, [{ type:"text", text:`Erstelle das vollständige Rezept für: "${suggestion.name}". Beschreibung: ${suggestion.description}. Quelle: ${suggestion.source||"Internet"}` }], true);
       const data = extractJSON(raw);
