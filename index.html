@@ -34,10 +34,6 @@
     }
   </style>
 
-  <!--
-    Import-Map: löst `import "react"` zur Laufzeit auf esm.sh um.
-    Ohne Pin auf eine Patchversion — esm.sh liefert automatisch die neueste stabile 18.x.
-  -->
   <script type="importmap">
   {
     "imports": {
@@ -55,11 +51,6 @@
     </div>
   </div>
 
-  <!--
-    Babel-Standalone: KEIN Pin auf eine bestimmte Version,
-    damit die URL auch in Zukunft funktioniert.
-    Primär: unpkg.com, Fallback: cdn.jsdelivr.net.
-  -->
   <script>
     window.__babelLoaded = false;
     window.__babelError = null;
@@ -93,37 +84,55 @@
       };
 
       try {
+        // 1) Warten auf Babel
         setStatus('Babel wird geladen…');
         const maxWait = 15000;
         const start = Date.now();
         while (!window.__babelLoaded && !window.__babelError) {
           if (Date.now() - start > maxWait) {
-            throw new Error('Babel lädt zu lange — Verbindung zu unpkg.com/jsdelivr.net prüfen.');
+            throw new Error('Babel lädt zu lange — Verbindung prüfen.');
           }
           await new Promise((r) => setTimeout(r, 100));
         }
         if (window.__babelError) throw new Error(window.__babelError);
-        if (typeof Babel === 'undefined') throw new Error('Babel ist geladen, aber nicht verfügbar.');
+        if (typeof Babel === 'undefined') throw new Error('Babel nicht verfügbar.');
 
+        // 2) JSX-Datei holen — explizit als ArrayBuffer, damit wir UTF-8 sauber dekodieren
         setStatus('Rezept-Finder.jsx wird geladen…');
-        const res = await fetch('./Rezept-Finder.jsx');
+        // Cache-Buster verhindert, dass alte/kaputte Versionen gecached werden
+        const cacheBust = '?v=' + Date.now();
+        const res = await fetch('./Rezept-Finder.jsx' + cacheBust);
         if (!res.ok) {
-          throw new Error('Rezept-Finder.jsx nicht gefunden (HTTP ' + res.status + '). Die Datei muss im selben Ordner wie index.html liegen.');
+          throw new Error('Rezept-Finder.jsx nicht gefunden (HTTP ' + res.status + ').');
         }
-        const source = await res.text();
+        const buffer = await res.arrayBuffer();
+        // Zwangsweise UTF-8 dekodieren
+        let source = new TextDecoder('utf-8').decode(buffer);
+        // UTF-8 BOM entfernen, falls vorhanden (Babel kann BOM nicht verarbeiten)
+        if (source.charCodeAt(0) === 0xFEFF) {
+          source = source.slice(1);
+        }
 
+        // 3) Kodierungs-Check: Enthält die Datei kaputte Umlaute?
+        if (/Ã¶|Ã¤|Ã¼|ÃŸ|â€¦|ðŸ|â€|Â·/.test(source)) {
+          throw new Error('Die Rezept-Finder.jsx hat eine kaputte Zeichenkodierung (Mojibake). Bitte die Datei neu aus dem Chat herunterladen und ins Repo hochladen — ohne sie zwischendurch in einem Editor zu öffnen, der UTF-8 nicht unterstützt.');
+        }
+
+        // 4) JSX → JS kompilieren
         setStatus('App wird kompiliert…');
         const compiled = Babel.transform(source, {
           presets: [['react', { runtime: 'classic' }]],
           sourceType: 'module',
         }).code;
 
-        const blob = new Blob([compiled], { type: 'text/javascript' });
+        // 5) Als ES-Modul laden
+        const blob = new Blob([compiled], { type: 'text/javascript;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const mod = await import(url);
         const App = mod.default;
         if (!App) throw new Error('Kein default export in Rezept-Finder.jsx gefunden.');
 
+        // 6) App rendern
         setStatus('App wird gestartet…');
         const React = await import('react');
         const { createRoot } = await import('react-dom/client');
