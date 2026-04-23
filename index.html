@@ -2,713 +2,103 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rezept-Finder 60+</title>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#D4654A" />
+  <title>Rezept-Finder</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap"
+    rel="stylesheet"
+  />
+
   <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; background: #FDF6F0; font-family: 'DM Sans', sans-serif; }
+    html, body { margin: 0; padding: 0; background: #FDF6F0; }
+    body { font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased; }
+    #root { min-height: 100vh; }
+    #boot-message {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100vh; color: #7A6B6B; font-size: 14px; text-align: center; padding: 24px;
+    }
+    #boot-message .spinner {
+      width: 36px; height: 36px; border: 3px solid #E8DDD5;
+      border-top-color: #D4654A; border-radius: 50%;
+      animation: spin 0.9s linear infinite; margin-bottom: 16px;
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
+    #boot-error {
+      max-width: 480px; background: #FEE; border: 1px solid #D44; color: #922;
+      padding: 16px 20px; border-radius: 12px; font-size: 13px; text-align: left;
+      white-space: pre-wrap; word-break: break-word;
+    }
   </style>
+
+  <!--
+    Import-Map: "react" und "react-dom/client" werden aus esm.sh geladen.
+    esm.sh liefert React als ES-Modul, so dass `import { useState } from "react"` funktioniert.
+  -->
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/[email protected]",
+      "react-dom/client": "https://esm.sh/[email protected]/client"
+    }
+  }
+  </script>
 </head>
 <body>
-<div id="root"></div>
-
-<script type="text/babel">
-const { useState, useRef, useEffect } = React;
-
-// ==================== CONSTANTS ====================
-const COLORS = {
-  bg: "#FDF6F0", card: "#FFFFFF", accent: "#D4654A", accentDark: "#A8422E",
-  accentLight: "#F0A58E", green: "#5A9E6F", greenLight: "#D4EDDA",
-  orange: "#E8913A", orangeLight: "#FDE8D0", text: "#3B2F2F", textLight: "#7A6B6B",
-  border: "#E8DDD5", legendBg: "#FAF5F2", timerBg: "#FFF3ED", tipBg: "#F0F7F1",
-};
-const API_MODEL = "claude-sonnet-4-20250514";
-const STORAGE_KEY = "rezeptfinder_apikey";
-
-// ==================== API HELPER ====================
-async function callClaude(apiKey, systemPrompt, userContent, useWebSearch = false) {
-  const body = {
-    model: API_MODEL, max_tokens: 4096,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userContent }],
-  };
-  if (useWebSearch) body.tools = [{ type: "web_search_20250305", name: "web_search" }];
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) { const err = await res.text(); throw new Error(`API-Fehler (${res.status}): ${err}`); }
-  const data = await res.json();
-  return data.content.filter(b => b.type === "text").map(b => b.text).join("\n");
-}
-
-function extractJSON(text) {
-  // 1. JSON-Codeblock
-  const cbMatch = text.match(/```json\s*([\s\S]*?)```/);
-  if (cbMatch) { try { return JSON.parse(cbMatch[1].trim()); } catch(e) {} }
-
-  const tryParse = str => { try { return JSON.parse(str); } catch(e) { return null; } };
-
-  // 2. Erstes vollstaendiges Array mit Klammer-Balancing
-  const arrStart = text.indexOf("[");
-  if (arrStart !== -1) {
-    let depth = 0, inStr = false, esc = false;
-    for (let i = arrStart; i < text.length; i++) {
-      const c = text[i];
-      if (esc) { esc = false; continue; }
-      if (c === "\\" && inStr) { esc = true; continue; }
-      if (c === '"') { inStr = !inStr; continue; }
-      if (inStr) continue;
-      if (c === "[" || c === "{") depth++;
-      if (c === "]" || c === "}") {
-        depth--;
-        if (depth === 0) { const r = tryParse(text.slice(arrStart, i+1)); if (r) return r; break; }
-      }
-    }
-  }
-
-  // 3. Erstes vollstaendiges Objekt mit Klammer-Balancing
-  const objStart = text.indexOf("{");
-  if (objStart !== -1) {
-    let depth = 0, inStr = false, esc = false;
-    for (let i = objStart; i < text.length; i++) {
-      const c = text[i];
-      if (esc) { esc = false; continue; }
-      if (c === "\\" && inStr) { esc = true; continue; }
-      if (c === '"') { inStr = !inStr; continue; }
-      if (inStr) continue;
-      if (c === "{") depth++;
-      if (c === "}") {
-        depth--;
-        if (depth === 0) { const r = tryParse(text.slice(objStart, i+1)); if (r) return r; break; }
-      }
-    }
-  }
-
-  throw new Error("Kein gueltiges JSON. Antwort: " + text.slice(0, 300));
-}
-
-// ==================== LOADING ====================
-const LOADING_SEARCH = ["Durchstöbere Rezepte…", "Prüfe Nährwerte…", "Berechne 60+-Kriterien…", "Fast geschafft…"];
-const LOADING_RECIPE = ["Lese das Rezept im Detail…", "Sortiere Zutaten und Schritte…", "Berechne Mengen und Timer…"];
-
-function LoadingScreen({ messages }) {
-  const [idx, setIdx] = useState(0);
-  useEffect(() => {
-    const iv = setInterval(() => setIdx(i => (i + 1) % messages.length), 2500);
-    return () => clearInterval(iv);
-  }, [messages]);
-  return (
-    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:60, gap:24, minHeight:"60vh" }}>
-      <div style={{ width:48, height:48, border:`4px solid ${COLORS.border}`, borderTopColor:COLORS.accent, borderRadius:"50%", animation:"spin 0.9s linear infinite" }} />
-      <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:15, color:COLORS.textLight, textAlign:"center", minHeight:24 }}>{messages[idx]}</p>
-    </div>
-  );
-}
-
-// ==================== API KEY SCREEN ====================
-function ApiKeyScreen({ onSave }) {
-  const [key, setKey] = useState("");
-  return (
-    <div style={{ maxWidth:480, margin:"0 auto", padding:"60px 24px", textAlign:"center" }}>
-      <div style={{ fontSize:42, marginBottom:12 }}>🔑</div>
-      <h1 style={{ fontFamily:"'DM Serif Display',serif", fontSize:"1.8rem", color:COLORS.text, marginBottom:8 }}>Rezept-Finder 60+</h1>
-      <p style={{ fontFamily:"'DM Sans',sans-serif", color:COLORS.textLight, fontSize:14, marginBottom:32, lineHeight:1.6 }}>
-        Gib deinen Anthropic API-Key ein, um die App zu nutzen.<br/>
-        Der Key wird nur in deinem Browser gespeichert.
-      </p>
-      <input
-        type="password"
-        value={key}
-        onChange={e => setKey(e.target.value)}
-        placeholder="sk-ant-..."
-        style={{ width:"100%", fontFamily:"'DM Sans',sans-serif", fontSize:14, padding:"14px 16px",
-          border:`2px solid ${COLORS.border}`, borderRadius:12, outline:"none", marginBottom:16, color:COLORS.text }}
-        onKeyDown={e => e.key === "Enter" && key.trim() && onSave(key.trim())}
-      />
-      <button
-        disabled={!key.trim()}
-        onClick={() => onSave(key.trim())}
-        style={{ width:"100%", padding:"14px", fontFamily:"'DM Sans',sans-serif", fontSize:15, fontWeight:700,
-          background: key.trim() ? `linear-gradient(135deg,${COLORS.accent},${COLORS.accentDark})` : COLORS.border,
-          color:"#fff", border:"none", borderRadius:12, cursor: key.trim() ? "pointer" : "not-allowed" }}>
-        Weiter
-      </button>
-      <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:COLORS.textLight, marginTop:16 }}>
-        API-Key erhältlich auf <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color:COLORS.accent }}>console.anthropic.com</a>
-      </p>
-    </div>
-  );
-}
-
-// ==================== SEARCH SCREEN ====================
-const filterLabel = { display:"block", fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:600, color:COLORS.textLight, marginBottom:5, letterSpacing:0.3 };
-const filterSelect = { width:"100%", fontFamily:"'DM Sans',sans-serif", fontSize:14, padding:"10px 14px", border:`2px solid ${COLORS.border}`, borderRadius:10, outline:"none", background:COLORS.card, color:COLORS.text, cursor:"pointer", boxSizing:"border-box" };
-
-function SearchScreen({ onSearch, onClearKey }) {
-  const [query, setQuery] = useState("");
-  const [maxTime, setMaxTime] = useState("");
-  const [cuisine, setCuisine] = useState("");
-  const [diet, setDiet] = useState("");
-  const [image, setImage] = useState(null);
-  const fileRef = useRef();
-  const dropRef = useRef();
-
-  const handleFile = file => {
-    if (!file || !file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-      const base64Full = e.target.result;
-      setImage({ base64: base64Full.split(",")[1], preview: base64Full, name: file.name, mediaType: file.type === "image/heic" ? "image/jpeg" : file.type });
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleDrop = e => {
-    e.preventDefault(); e.stopPropagation();
-    if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0]);
-  };
-
-  const canSubmit = query.trim() || image;
-
-  return (
-    <div style={{ maxWidth:600, margin:"0 auto", padding:"40px 24px" }}>
-      <div style={{ textAlign:"center", marginBottom:40 }}>
-        <div style={{ fontSize:42, marginBottom:8 }}>🍳</div>
-        <h1 style={{ fontFamily:"'DM Serif Display',serif", fontSize:"2rem", color:COLORS.text, margin:0, lineHeight:1.2 }}>Rezept-Finder 60+</h1>
-        <p style={{ fontFamily:"'DM Sans',sans-serif", color:COLORS.textLight, fontSize:14, marginTop:8 }}>
-          Ausgewogene Rezepte nach WHO- und DGE-Empfehlungen für Menschen ab 60
-        </p>
-      </div>
-
-      <div style={{ marginBottom:16 }}>
-        <textarea value={query} onChange={e => setQuery(e.target.value)}
-          placeholder="Was hast du da? Oder worauf hast du Lust?"
-          rows={3}
-          style={{ width:"100%", fontFamily:"'DM Sans',sans-serif", fontSize:15, padding:"16px 18px",
-            border:`2px solid ${COLORS.border}`, borderRadius:14, resize:"none", outline:"none",
-            background:COLORS.card, color:COLORS.text, lineHeight:1.5 }}
-          onFocus={e => e.target.style.borderColor = COLORS.accent}
-          onBlur={e => e.target.style.borderColor = COLORS.border}
-        />
-      </div>
-
-      {/* Filter */}
-      <div style={{ display:"flex", gap:10, marginBottom:20, flexWrap:"wrap" }}>
-        <div style={{ flex:1, minWidth:100 }}>
-          <label style={filterLabel}>⏱ Max. Dauer</label>
-          <select value={maxTime} onChange={e => setMaxTime(e.target.value)} style={filterSelect}>
-            <option value="">Egal</option>
-            {["15","20","30","45","60","90"].map(v => <option key={v} value={v}>{v} Min.</option>)}
-          </select>
-        </div>
-        <div style={{ flex:1, minWidth:100 }}>
-          <label style={filterLabel}>🌍 Küche / Region</label>
-          <select value={cuisine} onChange={e => setCuisine(e.target.value)} style={filterSelect}>
-            <option value="">Egal</option>
-            {["Afrikanisch","Asiatisch","Deutsch","Französisch","Griechisch","Indisch","Italienisch","Japanisch","Koreanisch","Levantinisch","Mexikanisch","Orientalisch","Südamerikanisch","Thai","Türkisch","Vietnamesisch"].map(v => <option key={v} value={v}>{v}</option>)}
-          </select>
-        </div>
-        <div style={{ flex:1, minWidth:100 }}>
-          <label style={filterLabel}>🥩 Ernährung</label>
-          <select value={diet} onChange={e => setDiet(e.target.value)} style={filterSelect}>
-            <option value="">Egal</option>
-            {["Fisch","Fleisch","Vegetarisch","Vegan"].map(v => <option key={v} value={v}>{v}</option>)}
-          </select>
-        </div>
-      </div>
-
-      {/* Drop Zone */}
-      <div ref={dropRef} onClick={() => fileRef.current?.click()}
-        onDragOver={e => { e.preventDefault(); }}
-        onDragLeave={() => {}}
-        onDrop={handleDrop}
-        style={{ border:`2px dashed ${image ? COLORS.green : COLORS.border}`, borderRadius:14,
-          padding: image ? 12 : 28, textAlign:"center", cursor:"pointer",
-          background: image ? COLORS.greenLight + "33" : COLORS.legendBg, transition:"all 0.25s", marginBottom:20 }}>
-        <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={e => handleFile(e.target.files?.[0])} />
-        {image ? (
-          <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-            <img src={image.preview} alt="Vorschau" style={{ width:64, height:64, objectFit:"cover", borderRadius:10 }} />
-            <div style={{ flex:1, textAlign:"left" }}>
-              <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:600, color:COLORS.text }}>{image.name}</div>
-              <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, color:COLORS.green }}>✓ Foto bereit</div>
-            </div>
-            <button onClick={e => { e.stopPropagation(); setImage(null); }}
-              style={{ width:28, height:28, borderRadius:"50%", border:"none", background:COLORS.accent, color:"#fff", fontSize:14, cursor:"pointer" }}>✕</button>
-          </div>
-        ) : (
-          <>
-            <div style={{ fontSize:28, marginBottom:8 }}>📷</div>
-            <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:COLORS.textLight, lineHeight:1.5 }}>
-              Foto hierher ziehen oder klicken<br/>
-              <span style={{ fontSize:12 }}>z. B. aus einem Rezeptbuch, Zeitschrift oder Verpackung</span>
-            </div>
-          </>
-        )}
-      </div>
-
-      <button disabled={!canSubmit} onClick={() => onSearch(query.trim(), image, maxTime, cuisine, diet)}
-        style={{ width:"100%", padding:"16px 24px", fontFamily:"'DM Sans',sans-serif", fontSize:16, fontWeight:700,
-          background: canSubmit ? `linear-gradient(135deg,${COLORS.accent},${COLORS.accentDark})` : COLORS.border,
-          color:"#fff", border:"none", borderRadius:14, cursor: canSubmit ? "pointer" : "not-allowed",
-          boxShadow: canSubmit ? "0 4px 20px rgba(212,101,74,0.3)" : "none", marginBottom:12 }}>
-        🔍 Rezepte suchen
-      </button>
-      <div style={{ textAlign:"center" }}>
-        <button onClick={onClearKey} style={{ background:"none", border:"none", fontFamily:"'DM Sans',sans-serif", fontSize:12, color:COLORS.textLight, cursor:"pointer", textDecoration:"underline" }}>
-          API-Key ändern
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ==================== SUGGESTION CARDS ====================
-const tagStyle = { fontFamily:"'DM Sans',sans-serif", fontSize:12, fontWeight:500, padding:"4px 10px", borderRadius:10, background:COLORS.legendBg, color:COLORS.textLight };
-
-function SuggestionScreen({ suggestions, onSelect, onBack }) {
-  return (
-    <div style={{ maxWidth:720, margin:"0 auto", padding:"32px 24px" }}>
-      <button onClick={onBack} style={{ background:"none", border:"none", fontFamily:"'DM Sans',sans-serif", fontSize:14, color:COLORS.accent, cursor:"pointer", marginBottom:20, padding:0 }}>← Neue Suche</button>
-      <h2 style={{ fontFamily:"'DM Serif Display',serif", fontSize:"1.5rem", color:COLORS.text, marginBottom:24 }}>3 Vorschläge für dich</h2>
-      <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-        {suggestions.map((r, i) => (
-          <div key={i} style={{ background:COLORS.card, borderRadius:16, padding:24, boxShadow:"0 2px 16px rgba(60,40,30,0.07)", border:`1px solid ${COLORS.border}` }}>
-            <h3 style={{ fontFamily:"'DM Serif Display',serif", fontSize:"1.2rem", color:COLORS.text, margin:"0 0 8px" }}>{r.name}</h3>
-            <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:COLORS.textLight, lineHeight:1.5, margin:"0 0 12px" }}>{r.description}</p>
-            <div style={{ display:"flex", gap:12, flexWrap:"wrap", marginBottom:12 }}>
-              {r.time && <span style={tagStyle}>⏱ {r.time}</span>}
-              {r.difficulty && <span style={tagStyle}>{r.difficulty}</span>}
-            </div>
-            {/* Nährwerte Vorschau */}
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6, marginBottom:12 }}>
-              {[
-                ["🔥","kcal",r.nutrition?.kcal,"KCAL"],
-                ["💪","protein",r.nutrition?.protein,"Eiweiß"],
-                ["🌾","fiber",r.nutrition?.fiber,"Ballaststoffe"],
-                ["🦴","calcium",r.nutrition?.calcium,"Kalzium"],
-                ["☀️","vitaminD",r.nutrition?.vitaminD,"Vit. D"],
-                ["🧬","vitaminB12",r.nutrition?.vitaminB12,"Vit. B12"],
-              ].filter(([,,val]) => val).map(([icon,,val,label]) => (
-                <div key={label} style={{ background:COLORS.legendBg, borderRadius:10, padding:"8px 10px", textAlign:"center" }}>
-                  <div style={{ fontSize:14, marginBottom:2 }}>{icon}</div>
-                  <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:12, color:COLORS.accent }}>{val}</div>
-                  <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:COLORS.textLight }}>{label}</div>
-                </div>
-              ))}
-            </div>
-            {/* Ernährungs-Info 60+ */}
-            {r.nutritionInfo60 && (
-              <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:12, padding:"8px 12px", borderRadius:10, background:COLORS.greenLight + "66", color:COLORS.green, marginBottom:12, lineHeight:1.4 }}>
-                🥗 {r.nutritionInfo60}
-              </div>
-            )}
-            {r.source && <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, color:COLORS.textLight, marginBottom:12 }}>Quelle: {r.source}</div>}
-            <button onClick={() => onSelect(r)} style={{ padding:"12px 24px", fontFamily:"'DM Sans',sans-serif", fontSize:14, fontWeight:600, background:COLORS.accent, color:"#fff", border:"none", borderRadius:10, cursor:"pointer" }}>
-              Dieses Rezept wählen
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ==================== RECIPE CARD ====================
-const metaStyle = { color:"rgba(255,255,255,0.85)", fontSize:13, fontFamily:"'DM Sans',sans-serif", display:"flex", alignItems:"center", gap:5 };
-const sectionTitle = { fontFamily:"'DM Serif Display',serif", fontSize:"1.3rem", color:COLORS.text, marginBottom:16 };
-const chipStyle = { fontFamily:"'DM Sans',sans-serif", fontSize:12, fontWeight:600, padding:"5px 14px", borderRadius:20 };
-const portionBtn = { width:38, height:38, borderRadius:"50%", border:`2px solid ${COLORS.accent}`, background:"transparent", color:COLORS.accent, fontSize:18, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" };
-const actionBtn = bg => ({ width:"100%", padding:"14px 24px", fontFamily:"'DM Sans',sans-serif", fontSize:15, fontWeight:600, background:bg, color:"#fff", border:"none", borderRadius:12, cursor:"pointer" });
-
-function RecipeCard({ recipe, onBack, onPrintRecipe, onPrintList }) {
-  const basePortion = recipe.servings || 4;
-  const [portions, setPortions] = useState(basePortion);
-  const [checked, setChecked] = useState(() => recipe.ingredients.map(() => false));
-  const [timers, setTimers] = useState({});
-  const timerRefs = useRef({});
-
-  const toggle = i => { const c = [...checked]; c[i] = !c[i]; setChecked(c); };
-
-  const scale = amount => {
-    if (!amount || amount === 0) return "";
-    const s = (amount / basePortion) * portions;
-    if (s === Math.floor(s)) return s.toString();
-    const n = Math.round(s * 4) / 4;
-    if (n === Math.floor(n)) return n.toString();
-    const w = Math.floor(n), f = n - w;
-    let fs = Math.abs(f-0.25)<0.01?"¼":Math.abs(f-0.5)<0.01?"½":Math.abs(f-0.75)<0.01?"¾":f.toFixed(1);
-    return w > 0 ? `${w} ${fs}` : fs;
-  };
-
-  const haveCount = checked.filter(Boolean).length;
-  const buyCount = checked.filter(c => !c).length;
-
-  const toggleTimer = (idx, secs) => {
-    if (timers[idx]) { clearInterval(timerRefs.current[idx]); setTimers(t => { const n={...t}; delete n[idx]; return n; }); return; }
-    setTimers(t => ({ ...t, [idx]: { remaining: secs, running: true } }));
-    timerRefs.current[idx] = setInterval(() => {
-      setTimers(t => {
-        if (!t[idx]) return t;
-        const rem = t[idx].remaining - 1;
-        if (rem <= 0) { clearInterval(timerRefs.current[idx]); return { ...t, [idx]: { remaining:0, running:false, done:true } }; }
-        return { ...t, [idx]: { ...t[idx], remaining: rem } };
-      });
-    }, 1000);
-  };
-
-  const fmtTime = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
-
-  return (
-    <div style={{ maxWidth:680, margin:"0 auto", background:COLORS.card, minHeight:"100vh", boxShadow:"0 0 60px rgba(60,40,30,0.08)" }}>
-      {/* Header */}
-      <div style={{ background:`linear-gradient(135deg,${COLORS.accent},${COLORS.accentDark})`, padding:"44px 28px 36px", position:"relative", overflow:"hidden" }}>
-        <div style={{ position:"absolute", top:-40, right:-40, width:200, height:200, background:"rgba(255,255,255,0.06)", borderRadius:"50%" }} />
-        <button onClick={onBack} style={{ background:"rgba(255,255,255,0.18)", border:"none", color:"#fff", fontFamily:"'DM Sans',sans-serif", fontSize:12, padding:"5px 14px", borderRadius:20, cursor:"pointer", marginBottom:14 }}>← Zurück</button>
-        {recipe.tags && (
-          <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
-            {recipe.tags.map((t,i) => (
-              <span key={i} style={{ background:"rgba(255,255,255,0.18)", color:"#fff", fontSize:11, fontWeight:600, letterSpacing:1.2, textTransform:"uppercase", padding:"4px 12px", borderRadius:16, fontFamily:"'DM Sans',sans-serif" }}>{t}</span>
-            ))}
-          </div>
-        )}
-        <h1 style={{ fontFamily:"'DM Serif Display',serif", fontWeight:400, fontSize:"1.8rem", color:"#fff", lineHeight:1.2, margin:0, position:"relative", zIndex:1 }}>{recipe.name}</h1>
-        <div style={{ display:"flex", gap:20, marginTop:16, flexWrap:"wrap" }}>
-          {recipe.time && <span style={metaStyle}>⏱ {recipe.time}</span>}
-          {recipe.difficulty && <span style={metaStyle}>✓ {recipe.difficulty}</span>}
-          <span style={metaStyle}>👥 {portions} Portionen</span>
-        </div>
-      </div>
-
-      <div style={{ padding:"28px 28px 40px" }}>
-        {/* Portionenregler */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:20, padding:18, background:COLORS.legendBg, borderRadius:14, marginBottom:24 }}>
-          <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:600, color:COLORS.textLight, textTransform:"uppercase", letterSpacing:0.8 }}>Portionen</span>
-          <button onClick={() => setPortions(Math.max(1, portions-1))} style={portionBtn}>−</button>
-          <span style={{ fontFamily:"'DM Serif Display',serif", fontSize:26, color:COLORS.accent, minWidth:32, textAlign:"center" }}>{portions}</span>
-          <button onClick={() => setPortions(Math.min(20, portions+1))} style={portionBtn}>+</button>
-        </div>
-
-        {/* Zutaten */}
-        <h2 style={sectionTitle}>🧅 Zutaten</h2>
-        <div style={{ display:"flex", gap:16, padding:"12px 16px", background:COLORS.legendBg, borderRadius:10, marginBottom:16, fontSize:13, fontFamily:"'DM Sans',sans-serif" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:6 }}><div style={{ width:16, height:16, borderRadius:4, background:COLORS.green }} /><span>✓ Vorhanden</span></div>
-          <div style={{ display:"flex", alignItems:"center", gap:6 }}><div style={{ width:16, height:16, borderRadius:4, border:`2px solid ${COLORS.border}`, background:"#fff" }} /><span>○ Einkaufen</span></div>
-        </div>
-
-        {recipe.ingredients.map((ing, i) => (
-          <div key={i} onClick={() => toggle(i)} style={{ display:"flex", alignItems:"center", gap:12, padding:"11px 0",
-            borderBottom: i < recipe.ingredients.length-1 ? `1px solid ${COLORS.border}` : "none",
-            cursor:"pointer", opacity: checked[i] ? 0.5 : 1, transition:"all 0.25s" }}>
-            <div style={{ width:24, height:24, borderRadius:6, flexShrink:0,
-              border:`2px solid ${checked[i] ? COLORS.green : COLORS.border}`,
-              background: checked[i] ? COLORS.green : "transparent",
-              display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.2s" }}>
-              {checked[i] && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><polyline points="4 12 10 18 20 6"/></svg>}
-            </div>
-            <span style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:600, fontSize:13, color:COLORS.accent, minWidth:65, textAlign:"right", flexShrink:0 }}>
-              {scale(ing.amount)}{ing.unit ? ` ${ing.unit}` : ""}
-            </span>
-            <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:14, flex:1, textDecoration: checked[i] ? "line-through" : "none", color: checked[i] ? COLORS.textLight : COLORS.text }}>
-              {ing.name}
-            </span>
-          </div>
-        ))}
-
-        {/* Zusammenfassung */}
-        <div style={{ display:"flex", gap:10, padding:14, background:COLORS.legendBg, borderRadius:10, marginTop:12, marginBottom:32, justifyContent:"center", flexWrap:"wrap" }}>
-          <span style={{ ...chipStyle, background:COLORS.greenLight, color:"#2D6B3F" }}>● {haveCount} vorhanden</span>
-          <span style={{ ...chipStyle, background:COLORS.orangeLight, color:"#9A5A10" }}>● {buyCount} einkaufen</span>
-        </div>
-
-        {/* Zubereitung */}
-        <h2 style={sectionTitle}>🍳 Zubereitung</h2>
-        {recipe.steps?.map((step, i) => (
-          <div key={i} style={{ display:"flex", gap:14, marginBottom:22 }}>
-            <div style={{ width:30, height:30, borderRadius:"50%", background:COLORS.accent, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:13, flexShrink:0, marginTop:2, fontFamily:"'DM Sans',sans-serif" }}>{i+1}</div>
-            <div style={{ flex:1 }}>
-              <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:14, lineHeight:1.6, margin:0 }}>{step.text}</p>
-              {step.timer && (
-                <div onClick={() => toggleTimer(i, step.timer)} style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"7px 14px", borderRadius:8, marginTop:8, cursor:"pointer", userSelect:"none",
-                  ...(timers[i]?.done ? { background:COLORS.green, color:"#fff" } : timers[i]?.running ? { background:COLORS.accent, color:"#fff" } : { background:COLORS.timerBg, border:`1px solid ${COLORS.accentLight}` }) }}>
-                  <span>⏱</span>
-                  <span style={{ fontWeight:700, fontSize:14, fontVariantNumeric:"tabular-nums", fontFamily:"'DM Sans',sans-serif" }}>{timers[i] ? fmtTime(timers[i].remaining) : fmtTime(step.timer)}</span>
-                  <span style={{ fontSize:11, opacity:0.8, fontFamily:"'DM Sans',sans-serif" }}>{timers[i]?.done ? "Fertig! ✓" : timers[i]?.running ? "läuft…" : "Timer starten"}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {/* Tipps */}
-        {recipe.tips && (
-          <div style={{ background:COLORS.tipBg, borderLeft:`4px solid ${COLORS.green}`, borderRadius:"0 12px 12px 0", padding:"18px 22px", marginTop:28 }}>
-            <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:13, color:COLORS.green, textTransform:"uppercase", letterSpacing:0.8, marginBottom:8 }}>💡 Tipps</div>
-            <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, lineHeight:1.6, color:COLORS.textLight, margin:0 }}>{recipe.tips}</p>
-          </div>
-        )}
-
-        {/* Ernährungs-Info 60+ */}
-        {recipe.nutritionInfo60 && (
-          <div style={{ background:COLORS.greenLight + "44", borderRadius:12, padding:"14px 18px", marginTop:16 }}>
-            <span style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, color:COLORS.green }}>🥗 <strong>Ernährungs-Info 60+:</strong> {recipe.nutritionInfo60}</span>
-          </div>
-        )}
-
-        {/* Nährwerte 60+ Block */}
-        {recipe.nutrition && (
-          <div style={{ background:COLORS.legendBg, borderRadius:16, padding:20, marginTop:24 }}>
-            <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:12, color:COLORS.textLight, textTransform:"uppercase", letterSpacing:0.8, marginBottom:14 }}>
-              🥗 Nährwerte pro Portion
-            </div>
-            {/* Hauptwerte: kcal + Makros */}
-            <div style={{ display:"flex", gap:8, justifyContent:"space-around", marginBottom:16, flexWrap:"wrap" }}>
-              {[
-                [recipe.nutrition.kcal,"KCAL","#D4654A"],
-                [recipe.nutrition.protein,"EIWEIẞ","#5A9E6F"],
-                [recipe.nutrition.fat,"FETT","#7A6B6B"],
-                [recipe.nutrition.carbs,"KH","#7A6B6B"],
-              ].filter(([v]) => v).map(([v,l,col]) => (
-                <div key={l} style={{ textAlign:"center" }}>
-                  <div style={{ fontFamily:"'DM Serif Display',serif", fontSize:"1.2rem", color:col }}>{v}</div>
-                  <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:COLORS.textLight, letterSpacing:0.5 }}>{l}</div>
-                </div>
-              ))}
-            </div>
-            {/* 60+ Schlüsselnährstoffe */}
-            <div style={{ borderTop:`1px solid ${COLORS.border}`, paddingTop:14 }}>
-              <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:11, fontWeight:600, color:COLORS.green, textTransform:"uppercase", letterSpacing:0.6, marginBottom:10 }}>
-                Schlüsselnährstoffe 60+
-              </div>
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(2,1fr)", gap:8 }}>
-                {[
-                  ["🌾","Ballaststoffe",recipe.nutrition.fiber,"30 g/Tag"],
-                  ["🦴","Kalzium",recipe.nutrition.calcium,"1.000–1.200 mg"],
-                  ["☀️","Vitamin D",recipe.nutrition.vitaminD,"20 µg/Tag"],
-                  ["🧬","Vitamin B12",recipe.nutrition.vitaminB12,"4 µg/Tag"],
-                ].filter(([,,v]) => v).map(([icon,label,val,ref]) => (
-                  <div key={label} style={{ background:"#fff", borderRadius:10, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
-                    <span style={{ fontSize:18 }}>{icon}</span>
-                    <div style={{ flex:1 }}>
-                      <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:13, fontWeight:600, color:COLORS.text }}>{val}</div>
-                      <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:10, color:COLORS.textLight }}>{label}</div>
-                      <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:9, color:COLORS.textLight, opacity:0.7 }}>Bedarf: {ref}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Buttons */}
-        <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:32 }}>
-          <button onClick={() => onPrintRecipe(recipe, checked, portions)} style={actionBtn(COLORS.accent)}>🖨️ Rezept-PDF drucken</button>
-          <button onClick={() => onPrintList(recipe, checked, portions)} style={actionBtn(COLORS.orange)}>🛒 Einkaufsliste drucken</button>
-          <button onClick={onBack} style={{ ...actionBtn(COLORS.card), color:COLORS.accent, border:`2px solid ${COLORS.accent}` }}>🔍 Neues Rezept suchen</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ==================== PDF PRINT ====================
-function printBlob(html) {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, "_blank");
-  if (!w) { alert("Bitte Pop-ups erlauben für den PDF-Druck."); return; }
-  w.onload = () => { w.print(); URL.revokeObjectURL(url); };
-}
-
-function buildRecipePrintHTML(recipe, checked, portions) {
-  const scale = amt => { if(!amt) return ""; const s=(amt/(recipe.servings||4))*portions; if(s===Math.floor(s)) return s.toString(); return (Math.round(s*4)/4).toString(); };
-  const ings = recipe.ingredients.map((ing,i) => `<tr style="opacity:${checked[i]?0.5:1}">
-    <td style="padding:6px 8px;text-align:center;font-size:18px">${checked[i]?"☑":"☐"}</td>
-    <td style="padding:6px 8px;text-align:right;font-weight:600;color:#D4654A;white-space:nowrap">${scale(ing.amount)}${ing.unit?" "+ing.unit:""}</td>
-    <td style="padding:6px 8px;${checked[i]?"text-decoration:line-through;color:#999":""}">${ing.name}</td>
-    <td style="padding:6px 8px;font-size:12px;color:#888">${checked[i]?"vorhanden":"einkaufen"}</td>
-  </tr>`).join("");
-  const steps = recipe.steps?.map((s,i) => `<li style="margin-bottom:10px;line-height:1.6">${s.text}${s.timer?` <em style="color:#E8913A">(${Math.floor(s.timer/60)} Min.)</em>`:""}</li>`).join("")||"";
-  const n = recipe.nutrition || {};
-  const nutr = recipe.nutrition ? `
-<div style="margin-top:24px;padding:16px;background:#FAF5F2;border-radius:10px">
-  <div style="font-size:11px;font-weight:700;color:#7A6B6B;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Nährwerte pro Portion</div>
-  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px">
-    ${[["kcal","KCAL","#D4654A"],["protein","EIWEIẞ","#5A9E6F"],["fat","FETT","#7A6B6B"],["carbs","KH","#7A6B6B"]].filter(([k])=>n[k]).map(([k,l,c])=>`<div style="text-align:center"><div style="font-family:'DM Serif Display',serif;font-size:1.1rem;color:${c}">${n[k]}</div><div style="font-size:10px;color:#7A6B6B">${l}</div></div>`).join("")}
-  </div>
-  <div style="border-top:1px solid #E8DDD5;padding-top:12px">
-    <div style="font-size:11px;font-weight:600;color:#5A9E6F;margin-bottom:8px">Schlüsselnährstoffe 60+</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-      ${[["🌾","fiber","Ballaststoffe","30 g/Tag"],["🦴","calcium","Kalzium","1.000–1.200 mg"],["☀️","vitaminD","Vitamin D","20 µg/Tag"],["🧬","vitaminB12","Vitamin B12","4 µg/Tag"]].filter(([,k])=>n[k]).map(([icon,k,label,ref])=>`<div style="background:#fff;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:8px"><span>${icon}</span><div><div style="font-weight:600;font-size:13px">${n[k]}</div><div style="font-size:10px;color:#7A6B6B">${label}</div><div style="font-size:9px;color:#aaa">Bedarf: ${ref}</div></div></div>`).join("")}
+  <div id="root">
+    <div id="boot-message">
+      <div class="spinner"></div>
+      <div>Rezept-Finder wird geladen…</div>
     </div>
   </div>
-</div>` : "";
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${recipe.name}</title>
-<style>@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap');
-body{font-family:'DM Sans',sans-serif;max-width:700px;margin:0 auto;padding:24px;color:#3B2F2F}
-h1{font-family:'DM Serif Display',serif;color:#D4654A;margin-bottom:4px}
-h2{font-family:'DM Serif Display',serif;margin-top:28px}
-table{width:100%;border-collapse:collapse}
-tr{border-bottom:1px solid #E8DDD5}
-@media print{body{padding:12px}}</style></head><body>
-<h1>${recipe.name}</h1>
-<p style="color:#7A6B6B;font-size:14px">${recipe.time||""} · ${recipe.difficulty||""} · ${portions} Portionen</p>
-<h2>Zutaten</h2><table>${ings}</table>
-<h2>Zubereitung</h2><ol style="padding-left:20px;font-size:14px">${steps}</ol>
-${recipe.tips?`<div style="background:#F0F7F1;border-left:4px solid #5A9E6F;padding:14px 18px;border-radius:0 10px 10px 0;margin-top:24px"><strong style="color:#5A9E6F">💡 Tipps:</strong><br><span style="font-size:13px;color:#7A6B6B">${recipe.tips}</span></div>`:""}
-${recipe.nutritionInfo60?`<div style="background:#D4EDDA44;border-radius:10px;padding:12px 16px;margin-top:16px;font-size:13px;color:#5A9E6F">🥗 <strong>Ernährungs-Info 60+:</strong> ${recipe.nutritionInfo60}</div>`:""}
-${nutr}
-<p style="text-align:center;font-size:11px;color:#aaa;margin-top:32px">Erstellt mit Rezept-Finder 60+</p>
-</body></html>`;
-}
 
-function buildShoppingPrintHTML(recipe, checked, portions) {
-  const scale = amt => { if(!amt) return ""; const s=(amt/(recipe.servings||4))*portions; if(s===Math.floor(s)) return s.toString(); return (Math.round(s*4)/4).toString(); };
-  const toBuy = recipe.ingredients.filter((_,i) => !checked[i]);
-  if (toBuy.length === 0) return null;
-  const rows = toBuy.map(ing => `<tr>
-    <td style="padding:8px 10px;font-size:20px">☐</td>
-    <td style="padding:8px 10px;text-align:right;font-weight:600;white-space:nowrap">${scale(ing.amount)}${ing.unit?" "+ing.unit:""}</td>
-    <td style="padding:8px 10px;font-size:15px">${ing.name}</td>
-  </tr>`).join("");
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Einkaufsliste – ${recipe.name}</title>
-<style>@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=DM+Serif+Display&display=swap');
-body{font-family:'DM Sans',sans-serif;max-width:500px;margin:0 auto;padding:24px;color:#3B2F2F}
-h1{font-family:'DM Serif Display',serif;color:#E8913A;font-size:1.4rem}
-table{width:100%;border-collapse:collapse}
-tr{border-bottom:1px solid #E8DDD5}
-@media print{body{padding:12px}}</style></head><body>
-<h1>🛒 Einkaufsliste</h1>
-<p style="color:#7A6B6B;font-size:13px">für: ${recipe.name} (${portions} Portionen) · ${toBuy.length} Artikel</p>
-<table>${rows}</table>
-<p style="text-align:center;font-size:11px;color:#aaa;margin-top:40px">Erstellt mit Rezept-Finder 60+</p>
-</body></html>`;
-}
+  <!-- Babel-Standalone kompiliert JSX im Browser -->
+  <script src="https://unpkg.com/@babel/[email protected]/babel.min.js"></script>
 
-// ==================== MAIN APP ====================
-function App() {
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem(STORAGE_KEY) || "");
-  const [screen, setScreen] = useState("search");
-  const [suggestions, setSuggestions] = useState([]);
-  const [recipe, setRecipe] = useState(null);
-  const [error, setError] = useState(null);
-  const [loadingMessages, setLoadingMessages] = useState(LOADING_SEARCH);
-  const [portions, setPortions] = useState(4);
+  <!--
+    Lade die JSX-Datei, transpiliere JSX zu JS und führe sie als ES-Modul aus.
+    So bleiben `import`/`export` erhalten und die Import-Map wird angewendet.
+  -->
+  <script>
+    (async function () {
+      try {
+        const res = await fetch('./Rezept-Finder.jsx');
+        if (!res.ok) throw new Error('Rezept-Finder.jsx nicht gefunden (' + res.status + ')');
+        const source = await res.text();
 
-  const saveKey = key => { localStorage.setItem(STORAGE_KEY, key); setApiKey(key); };
-  const clearKey = () => { localStorage.removeItem(STORAGE_KEY); setApiKey(""); };
+        // JSX -> JS (als ES-Modul, Import-Befehle bleiben erhalten)
+        const compiled = Babel.transform(source, {
+          presets: [['react', { runtime: 'classic' }]],
+          sourceType: 'module',
+        }).code;
 
-  if (!apiKey) return <ApiKeyScreen onSave={saveKey} />;
+        // Als Blob-URL laden, damit importmap greift und import/export funktionieren
+        const blob = new Blob([compiled], { type: 'text/javascript' });
+        const url = URL.createObjectURL(blob);
 
-  const SYSTEM_60PLUS = `Du bist ein Ernährungsexperte mit Fokus auf ausgewogene Ernährung für Menschen ab 60, basierend auf den Empfehlungen von WHO, DGE und EFSA. Bewerte jedes Rezept anhand dieser Kriterien:
-1. Nährstoffdichte (Vitamine, Mineralstoffe pro Kalorie)
-2. Eiweiß: mind. 1,0–1,2 g/kg/Tag, hochwertige Quellen, vollständige Aminosäuren
-3. Kalzium (1.000–1.200 mg/Tag) und Vitamin D (fetter Fisch, Ei)
-4. Ballaststoffe: mind. 30 g/Tag (Vollkorn, Hülsenfrüchte, Gemüse)
-5. Herzgesunde Fette: Olivenöl, Omega-3, wenig gesättigte Fette
-6. Natrium: max. 6 g Salz/Tag (WHO)
-7. Vitamin B12: bei vegetarisch/vegan besonders beachten
-8. Leichte, schonende Zubereitung (Dünsten, Kochen, Backen)
-Vergib automatisch passende Tags: Calciumreich, Vitamin-D-Quelle, Ballaststoffreich, Herzgesund, Omega-3-reich, Leicht verdaulich, Vegetarisch, Vegan, Proteinreich, Natriumarm, Suppenreich.
-Gib einen "nutritionInfo60"-Hinweis: max. 2–3 Sätze — was das Rezept gut erfüllt + ggf. eine einfache Ergänzung.`;
+        const mod = await import(url);
+        const App = mod.default;
+        if (!App) throw new Error('Kein default export in Rezept-Finder.jsx gefunden.');
 
-  const doSearch = async (query, image, maxTime, cuisine, diet) => {
-    setScreen("loading"); setLoadingMessages(LOADING_SEARCH); setError(null);
-    try {
-      const filters = [];
-      if (maxTime) filters.push(`Maximale Zubereitungszeit: ${maxTime} Minuten.`);
-      if (cuisine) filters.push(`Küche/Region: ${cuisine}.`);
-      if (diet) filters.push(`Ernährungsform: ${diet}. Nur Rezepte mit ${diet==="Fisch"?"Fisch (kein Fleisch)":diet==="Fleisch"?"Fleisch":diet==="Vegetarisch"?"vegetarischen Zutaten (kein Fisch, kein Fleisch)":"veganen Zutaten (keine tierischen Produkte)"}.`);
-      const filterText = filters.length > 0 ? `\nWICHTIGE FILTER: ${filters.join(" ")} Halte dich strikt daran.` : "";
+        const React = await import('react');
+        const { createRoot } = await import('react-dom/client');
 
-      const sysPrompt = `${SYSTEM_60PLUS}\n\nSuche im Internet nach 3 passenden Rezepten basierend auf der Anfrage.${filterText}
-Antworte NUR mit einem JSON-Array (keine Erklärung davor/danach):
-[{
-  "name": "Rezeptname",
-  "description": "Kurzbeschreibung 2-3 Sätze",
-  "time": "30 Min.",
-  "difficulty": "Einfach",
-  "nutrition": {"kcal":"350","protein":"22g","fat":"14g","carbs":"30g","fiber":"8g","calcium":"200mg","vitaminD":"2µg","vitaminB12":"1,2µg"},
-  "nutritionInfo60": "Hoher Kalzium- und Ballaststoffgehalt. Ergänze mit einem Glas Mineralwasser für die Flüssigkeitszufuhr.",
-  "source": "website.de"
-}]
-Alle Texte auf Deutsch. Nährwerte pro Portion schätzen. Schätze IMMER alle Nährwerte, auch Kalzium, Vitamin D und Vitamin B12.`;
-
-      const userContent = [];
-      if (image) userContent.push({ type:"image", source:{ type:"base64", media_type:image.mediaType, data:image.base64 } });
-      userContent.push({ type:"text", text: query || (image ? "Lies dieses Rezeptfoto und schlage 3 Varianten vor." : "Schlage 3 ausgewogene Rezepte für Menschen ab 60 vor.") + (maxTime ? ` Maximal ${maxTime} Minuten.` : "") + (cuisine ? ` Küche: ${cuisine}.` : "") + (diet ? ` Ernährung: ${diet}.` : "") });
-
-      const raw = await callClaude(apiKey, sysPrompt, userContent, true);
-      const data = extractJSON(raw);
-      setSuggestions((Array.isArray(data) ? data : [data]).slice(0, 3));
-      setScreen("suggestions");
-    } catch(e) { setError(e.message); setScreen("search"); }
-  };
-
-  const doSelectRecipe = async suggestion => {
-    setScreen("loading"); setLoadingMessages(LOADING_RECIPE); setError(null);
-    try {
-      const sysPrompt = `${SYSTEM_60PLUS}\n\nErstelle ein vollständiges Rezept als JSON. Suche im Internet nach dem genauen Rezept.
-Antworte NUR mit einem JSON-Objekt:
-{
-  "name": "Rezeptname",
-  "tags": ["Calciumreich","Ballaststoffreich"],
-  "time": "30 Min.",
-  "difficulty": "Einfach",
-  "servings": 4,
-  "ingredients": [{"amount":2,"unit":"EL","name":"Olivenöl"},{"amount":0,"unit":"","name":"Salz nach Geschmack"}],
-  "steps": [{"text":"Schritt...","timer":null},{"text":"10 Min. köcheln","timer":600}],
-  "tips": "Tipp-Text oder null",
-  "nutritionInfo60": "Max. 2-3 Sätze zur Einschätzung nach 60+-Kriterien",
-  "nutrition": {"kcal":"350","protein":"22g","fat":"14g","carbs":"30g","fiber":"8g","calcium":"200mg","vitaminD":"2µg","vitaminB12":"1,2µg"}
-}
-Einheiten: EL, TL, g, Stk., Bund, Dose, ml. Timer in Sekunden. Alles auf Deutsch. Schätze IMMER alle Nährwerte, auch Kalzium, Vitamin D und Vitamin B12.`;
-
-      const raw = await callClaude(apiKey, sysPrompt, [{ type:"text", text:`Erstelle das vollständige Rezept für: "${suggestion.name}". Beschreibung: ${suggestion.description}. Quelle: ${suggestion.source||"Internet"}` }], true);
-      const data = extractJSON(raw);
-      setRecipe(data); setPortions(data.servings || 4);
-      setScreen("recipe");
-    } catch(e) { setError(e.message); setScreen("suggestions"); }
-  };
-
-  const handlePrintRecipe = (rec, checked, por) => {
-    printBlob(buildRecipePrintHTML(rec, checked, por));
-  };
-  const handlePrintList = (rec, checked, por) => {
-    const html = buildShoppingPrintHTML(rec, checked, por);
-    if (!html) { alert("Alle Zutaten sind als vorhanden markiert — nichts einzukaufen!"); return; }
-    printBlob(html);
-  };
-
-  return (
-    <div style={{ minHeight:"100vh", background:COLORS.bg, fontFamily:"'DM Sans',sans-serif" }}>
-      {error && (
-        <div style={{ position:"fixed", top:16, left:"50%", transform:"translateX(-50%)", zIndex:100,
-          background:"#FEE", border:"1px solid #D44", borderRadius:12, padding:"12px 20px",
-          fontFamily:"'DM Sans',sans-serif", fontSize:13, color:"#922", maxWidth:500, boxShadow:"0 4px 20px rgba(0,0,0,0.1)" }}>
-          <strong>Fehler:</strong> {error}
-          <button onClick={() => setError(null)} style={{ marginLeft:12, background:"none", border:"none", color:"#922", cursor:"pointer", fontWeight:700 }}>✕</button>
-        </div>
-      )}
-      {screen === "search" && <SearchScreen onSearch={doSearch} onClearKey={clearKey} />}
-      {screen === "loading" && <LoadingScreen messages={loadingMessages} />}
-      {screen === "suggestions" && <SuggestionScreen suggestions={suggestions} onSelect={doSelectRecipe} onBack={() => setScreen("search")} />}
-      {screen === "recipe" && recipe && (
-        <RecipeCard recipe={recipe} onBack={() => setScreen("search")} onPrintRecipe={handlePrintRecipe} onPrintList={handlePrintList} />
-      )}
-    </div>
-  );
-}
-
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-</script>
+        const root = createRoot(document.getElementById('root'));
+        root.render(React.createElement(App));
+      } catch (e) {
+        const el = document.getElementById('root');
+        el.innerHTML =
+          '<div id="boot-message"><div id="boot-error">' +
+          '<strong>Die App konnte nicht geladen werden.</strong><br><br>' +
+          (e && e.message ? String(e.message) : String(e)) +
+          '<br><br>Bitte Seite neu laden. Bleibt der Fehler: Konsole öffnen (F12).' +
+          '</div></div>';
+        console.error(e);
+      }
+    })();
+  </script>
 </body>
 </html>
