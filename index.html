@@ -38,6 +38,7 @@
   {
     "imports": {
       "react": "https://esm.sh/react@18",
+      "react/jsx-runtime": "https://esm.sh/react@18/jsx-runtime",
       "react-dom/client": "https://esm.sh/react-dom@18/client"
     }
   }
@@ -99,9 +100,7 @@
 
         // 2) JSX-Datei holen — explizit als ArrayBuffer, damit wir UTF-8 sauber dekodieren
         setStatus('Rezept-Finder.jsx wird geladen…');
-        // Cache-Buster verhindert, dass alte/kaputte Versionen gecached werden
-        const cacheBust = '?v=' + Date.now();
-        const res = await fetch('./Rezept-Finder.jsx' + cacheBust);
+        const res = await fetch('./Rezept-Finder.jsx', { cache: 'no-store' });
         if (!res.ok) {
           throw new Error('Rezept-Finder.jsx nicht gefunden (HTTP ' + res.status + ').');
         }
@@ -121,7 +120,7 @@
         // 4) JSX → JS kompilieren
         setStatus('App wird kompiliert…');
         const compiled = Babel.transform(source, {
-          presets: [['react', { runtime: 'classic' }]],
+          presets: [['react', { runtime: 'automatic' }]],
           sourceType: 'module',
         }).code;
 
@@ -134,10 +133,10 @@
 
         // 6) App rendern
         setStatus('App wird gestartet…');
-        const React = await import('react');
+        const { createElement } = await import('react');
         const { createRoot } = await import('react-dom/client');
         const root = createRoot(document.getElementById('root'));
-        root.render(React.createElement(App));
+        root.render(createElement(App));
       } catch (e) {
         showError((e && e.message) ? e.message : e);
         console.error(e);
