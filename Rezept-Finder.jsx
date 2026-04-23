@@ -23,7 +23,11 @@ const API_MODEL = "claude-sonnet-4-20250514";
 
 // ==================== API HELPER ====================
 // Retry-Logik bei 429 (Rate Limit): wartet 25s und versucht erneut (max. 2x)
-async function callClaude(systemPrompt, userContent, useWebSearch = false, onRetry = null) {
+async function callClaude(apiKey, systemPrompt, userContent, useWebSearch = false, onRetry = null) {
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error("Kein API-Key hinterlegt. Bitte oben rechts auf das Zahnrad klicken und einen Claude API-Key eintragen.");
+  }
+
   const body = {
     model: API_MODEL,
     max_tokens: 2500,
@@ -38,11 +42,23 @@ async function callClaude(systemPrompt, userContent, useWebSearch = false, onRet
   const waitSeconds = 25;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let res;
+    try {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey.trim(),
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error(
+        "Verbindung zur Claude-API fehlgeschlagen. Mögliche Gründe: kein Internet, ungültiger API-Key, oder CORS-Blockierung. Originaler Fehler: " + e.message
+      );
+    }
 
     if (res.ok) {
       const data = await res.json();
@@ -58,6 +74,9 @@ async function callClaude(systemPrompt, userContent, useWebSearch = false, onRet
     }
 
     const err = await res.text();
+    if (res.status === 401) {
+      throw new Error("API-Key ungültig oder abgelaufen. Bitte in den Einstellungen (Zahnrad oben rechts) einen gültigen Key eintragen.");
+    }
     if (res.status === 429) {
       throw new Error(`Die API-Grenze ist erreicht. Bitte in 1–2 Minuten erneut versuchen.`);
     }
@@ -690,6 +709,107 @@ tr{border-bottom:1px solid #E8DDD5}
 </body></html>`;
 }
 
+// ==================== SETTINGS PANEL ====================
+function SettingsPanel({ apiKey, onSave, onClose }) {
+  const [value, setValue] = useState(apiKey || "");
+  const [show, setShow] = useState(false);
+
+  const masked = (k) => {
+    if (!k) return "";
+    if (k.length < 12) return "•".repeat(k.length);
+    return k.slice(0, 8) + "•".repeat(Math.max(0, k.length - 12)) + k.slice(-4);
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 200,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: COLORS.card, borderRadius: 16, padding: 28, maxWidth: 480, width: "100%",
+          boxShadow: "0 10px 40px rgba(0,0,0,0.2)", fontFamily: "'DM Sans',sans-serif",
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ fontFamily: "'DM Serif Display',serif", fontSize: "1.4rem", color: COLORS.text, margin: 0 }}>
+            ⚙️ Einstellungen
+          </h2>
+          <button onClick={onClose} style={{
+            width: 32, height: 32, borderRadius: "50%", border: "none", background: COLORS.legendBg,
+            color: COLORS.textLight, fontSize: 16, cursor: "pointer",
+          }}>✕</button>
+        </div>
+
+        <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: COLORS.text, marginBottom: 6 }}>
+          Claude API-Key
+        </label>
+        <div style={{ position: "relative", marginBottom: 10 }}>
+          <input
+            type={show ? "text" : "password"}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="sk-ant-api03-..."
+            style={{
+              width: "100%", padding: "10px 40px 10px 14px", fontSize: 13,
+              border: `2px solid ${COLORS.border}`, borderRadius: 10, outline: "none",
+              fontFamily: "monospace", boxSizing: "border-box",
+            }}
+          />
+          <button
+            onClick={() => setShow(!show)}
+            style={{
+              position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+              background: "none", border: "none", cursor: "pointer", fontSize: 14, padding: 4,
+            }}
+            title={show ? "Ausblenden" : "Anzeigen"}
+          >{show ? "🙈" : "👁"}</button>
+        </div>
+
+        {apiKey && !value && (
+          <div style={{ fontSize: 12, color: COLORS.textLight, marginBottom: 10 }}>
+            Aktuell gespeichert: <code>{masked(apiKey)}</code>
+          </div>
+        )}
+
+        <div style={{
+          fontSize: 12, color: COLORS.textLight, lineHeight: 1.5, marginBottom: 16,
+          padding: 12, background: COLORS.legendBg, borderRadius: 8,
+        }}>
+          Der Key wird nur lokal in deinem Browser gespeichert und nicht hochgeladen.
+          Einen Key kannst du kostenpflichtig auf <strong>console.anthropic.com</strong> erstellen
+          (separates Konto, nicht dein Claude-Chat-Abo).
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() => { onSave(value.trim()); onClose(); }}
+            style={{
+              flex: 1, padding: "12px 20px", fontSize: 14, fontWeight: 600,
+              background: COLORS.accent, color: "#fff", border: "none", borderRadius: 10, cursor: "pointer",
+              fontFamily: "'DM Sans',sans-serif",
+            }}
+          >💾 Speichern</button>
+          {apiKey && (
+            <button
+              onClick={() => { onSave(""); setValue(""); }}
+              style={{
+                padding: "12px 20px", fontSize: 14, fontWeight: 600,
+                background: "transparent", color: COLORS.textLight, border: `2px solid ${COLORS.border}`,
+                borderRadius: 10, cursor: "pointer", fontFamily: "'DM Sans',sans-serif",
+              }}
+            >Löschen</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ==================== MAIN APP ====================
 export default function App() {
   const [screen, setScreen] = useState("search"); // search | loading | suggestions | loadingRecipe | recipe | loadingPdf
@@ -699,6 +819,24 @@ export default function App() {
   const [loadingMessages, setLoadingMessages] = useState(LOADING_SEARCH);
   const [portions, setPortions] = useState(4);
   const lastChecked = useRef([]);
+
+  // API-Key: aus localStorage laden, bei Änderung speichern
+  const [apiKey, setApiKey] = useState(() => {
+    try {
+      return localStorage.getItem("rezept_finder_api_key") || "";
+    } catch {
+      return "";
+    }
+  });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const saveApiKey = (key) => {
+    setApiKey(key);
+    try {
+      if (key) localStorage.setItem("rezept_finder_api_key", key);
+      else localStorage.removeItem("rezept_finder_api_key");
+    } catch {}
+  };
 
   const doSearch = async (query, image, maxTime, cuisine, diet) => {
     setScreen("loading");
@@ -735,7 +873,7 @@ Alle Texte auf Deutsch. Nährwerte pro Portion schätzen.`;
         setError(`API-Limit erreicht. Versuche es automatisch in ${secs} Sek. erneut (Versuch ${attempt})...`);
       };
 
-      const raw = await callClaude(sysPrompt, userContent, true, onRetry);
+      const raw = await callClaude(apiKey, sysPrompt, userContent, true, onRetry);
       setError(null);
       const data = extractJSON(raw);
       const arr = Array.isArray(data) ? data : [data];
@@ -773,6 +911,7 @@ Einheiten: EL, TL, g, Stk., Bund, Dose, ml. Timer in Sekunden. Alles auf Deutsch
       };
 
       const raw = await callClaude(
+        apiKey,
         sysPrompt,
         [{ type: "text", text: `Rezept: "${suggestion.name}". ${suggestion.description}` }],
         false,
@@ -804,6 +943,41 @@ Einheiten: EL, TL, g, Stk., Bund, Dose, ml. Timer in Sekunden. Alles auf Deutsch
   return (
     <div style={{ minHeight: "100vh", background: COLORS.bg, fontFamily: "'DM Sans',sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet" />
+
+      {/* Zahnrad oben rechts für Einstellungen */}
+      <button
+        onClick={() => setSettingsOpen(true)}
+        title="Einstellungen"
+        style={{
+          position: "fixed", top: 12, right: 12, zIndex: 90,
+          width: 44, height: 44, borderRadius: "50%", border: "none",
+          background: apiKey ? COLORS.card : COLORS.orangeLight,
+          boxShadow: "0 2px 12px rgba(60,40,30,0.12)",
+          cursor: "pointer", fontSize: 20, display: "flex", alignItems: "center", justifyContent: "center",
+          color: COLORS.text,
+        }}
+      >
+        {apiKey ? "⚙️" : "🔑"}
+      </button>
+
+      {/* Hinweis-Banner, wenn kein Key hinterlegt ist */}
+      {!apiKey && (
+        <div style={{
+          background: COLORS.orangeLight, color: "#7A4A10", padding: "10px 64px 10px 20px",
+          fontSize: 13, fontFamily: "'DM Sans',sans-serif", textAlign: "center",
+          borderBottom: `1px solid ${COLORS.orange}`,
+        }}>
+          Kein API-Key hinterlegt. Oben rechts auf 🔑 klicken, um einen einzutragen.
+        </div>
+      )}
+
+      {settingsOpen && (
+        <SettingsPanel
+          apiKey={apiKey}
+          onSave={saveApiKey}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       {error && (
         <div style={{
