@@ -34,10 +34,7 @@
     }
   </style>
 
-  <!--
-    Import-Map: "react" und "react-dom/client" werden aus esm.sh geladen.
-    esm.sh liefert React als ES-Modul, so dass `import { useState } from "react"` funktioniert.
-  -->
+  <!-- Import-Map: löst `import "react"` zur Laufzeit auf esm.sh um -->
   <script type="importmap">
   {
     "imports": {
@@ -51,51 +48,91 @@
   <div id="root">
     <div id="boot-message">
       <div class="spinner"></div>
-      <div>Rezept-Finder wird geladen…</div>
+      <div id="boot-status">Rezept-Finder wird geladen…</div>
     </div>
   </div>
 
-  <!-- Babel-Standalone kompiliert JSX im Browser -->
-  <script src="https://unpkg.com/@babel/[email protected]/babel.min.js"></script>
-
   <!--
-    Lade die JSX-Datei, transpiliere JSX zu JS und führe sie als ES-Modul aus.
-    So bleiben `import`/`export` erhalten und die Import-Map wird angewendet.
+    Babel-Standalone: zwei CDNs (Primär + Fallback), beide synchron geladen.
+    "onerror" auf dem ersten Script probiert den Fallback. Nur wenn beide fehlschlagen,
+    zeigen wir dem User einen klaren Hinweis.
   -->
   <script>
+    window.__babelLoaded = false;
+    window.__babelError = null;
+  </script>
+  <script
+    src="https://unpkg.com/@babel/[email protected]/babel.min.js"
+    onload="window.__babelLoaded = true;"
+    onerror="(function(){
+      var s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/@babel/[email protected]/babel.min.js';
+      s.onload=function(){window.__babelLoaded=true;};
+      s.onerror=function(){window.__babelError='Babel konnte von keinem CDN geladen werden (unpkg.com und jsdelivr.net beide blockiert oder offline).';};
+      document.head.appendChild(s);
+    })();"
+  ></script>
+
+  <script>
     (async function () {
+      const setStatus = (txt) => {
+        const el = document.getElementById('boot-status');
+        if (el) el.textContent = txt;
+      };
+      const showError = (msg) => {
+        const el = document.getElementById('root');
+        el.innerHTML =
+          '<div id="boot-message"><div id="boot-error">' +
+          '<strong>Die App konnte nicht geladen werden.</strong><br><br>' +
+          String(msg).replace(/</g, '&lt;') +
+          '<br><br>Bitte Seite neu laden (Strg+F5). Bleibt der Fehler: Konsole öffnen (F12) und Fehler prüfen.' +
+          '</div></div>';
+      };
+
       try {
+        // 1) Warten, bis Babel-Standalone wirklich bereit ist (max. 15 Sek.)
+        setStatus('Babel wird geladen…');
+        const maxWait = 15000;
+        const start = Date.now();
+        while (!window.__babelLoaded && !window.__babelError) {
+          if (Date.now() - start > maxWait) {
+            throw new Error('Babel lädt zu lange — Verbindung zu unpkg.com/jsdelivr.net prüfen.');
+          }
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        if (window.__babelError) throw new Error(window.__babelError);
+        if (typeof Babel === 'undefined') throw new Error('Babel ist geladen, aber nicht verfügbar — unbekannter Fehler.');
+
+        // 2) JSX-Datei holen
+        setStatus('Rezept-Finder.jsx wird geladen…');
         const res = await fetch('./Rezept-Finder.jsx');
-        if (!res.ok) throw new Error('Rezept-Finder.jsx nicht gefunden (' + res.status + ')');
+        if (!res.ok) {
+          throw new Error('Rezept-Finder.jsx nicht gefunden (HTTP ' + res.status + '). Die Datei muss im selben Ordner wie index.html liegen.');
+        }
         const source = await res.text();
 
-        // JSX -> JS (als ES-Modul, Import-Befehle bleiben erhalten)
+        // 3) JSX -> JS kompilieren (als ES-Modul, damit import/export funktionieren)
+        setStatus('App wird kompiliert…');
         const compiled = Babel.transform(source, {
           presets: [['react', { runtime: 'classic' }]],
           sourceType: 'module',
         }).code;
 
-        // Als Blob-URL laden, damit importmap greift und import/export funktionieren
+        // 4) Als Blob-Modul laden, damit importmap greift
         const blob = new Blob([compiled], { type: 'text/javascript' });
         const url = URL.createObjectURL(blob);
-
         const mod = await import(url);
         const App = mod.default;
         if (!App) throw new Error('Kein default export in Rezept-Finder.jsx gefunden.');
 
+        // 5) React laden und App rendern
+        setStatus('App wird gestartet…');
         const React = await import('react');
         const { createRoot } = await import('react-dom/client');
-
         const root = createRoot(document.getElementById('root'));
         root.render(React.createElement(App));
       } catch (e) {
-        const el = document.getElementById('root');
-        el.innerHTML =
-          '<div id="boot-message"><div id="boot-error">' +
-          '<strong>Die App konnte nicht geladen werden.</strong><br><br>' +
-          (e && e.message ? String(e.message) : String(e)) +
-          '<br><br>Bitte Seite neu laden. Bleibt der Fehler: Konsole öffnen (F12).' +
-          '</div></div>';
+        showError((e && e.message) ? e.message : e);
         console.error(e);
       }
     })();
