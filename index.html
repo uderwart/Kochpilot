@@ -34,12 +34,15 @@
     }
   </style>
 
-  <!-- Import-Map: löst `import "react"` zur Laufzeit auf esm.sh um -->
+  <!--
+    Import-Map: löst `import "react"` zur Laufzeit auf esm.sh um.
+    Ohne Pin auf eine Patchversion — esm.sh liefert automatisch die neueste stabile 18.x.
+  -->
   <script type="importmap">
   {
     "imports": {
-      "react": "https://esm.sh/[email protected]",
-      "react-dom/client": "https://esm.sh/[email protected]/client"
+      "react": "https://esm.sh/react@18",
+      "react-dom/client": "https://esm.sh/react-dom@18/client"
     }
   }
   </script>
@@ -53,22 +56,22 @@
   </div>
 
   <!--
-    Babel-Standalone: zwei CDNs (Primär + Fallback), beide synchron geladen.
-    "onerror" auf dem ersten Script probiert den Fallback. Nur wenn beide fehlschlagen,
-    zeigen wir dem User einen klaren Hinweis.
+    Babel-Standalone: KEIN Pin auf eine bestimmte Version,
+    damit die URL auch in Zukunft funktioniert.
+    Primär: unpkg.com, Fallback: cdn.jsdelivr.net.
   -->
   <script>
     window.__babelLoaded = false;
     window.__babelError = null;
   </script>
   <script
-    src="https://unpkg.com/@babel/[email protected]/babel.min.js"
+    src="https://unpkg.com/@babel/standalone/babel.min.js"
     onload="window.__babelLoaded = true;"
     onerror="(function(){
       var s=document.createElement('script');
-      s.src='https://cdn.jsdelivr.net/npm/@babel/[email protected]/babel.min.js';
+      s.src='https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js';
       s.onload=function(){window.__babelLoaded=true;};
-      s.onerror=function(){window.__babelError='Babel konnte von keinem CDN geladen werden (unpkg.com und jsdelivr.net beide blockiert oder offline).';};
+      s.onerror=function(){window.__babelError='Babel konnte von keinem CDN geladen werden.';};
       document.head.appendChild(s);
     })();"
   ></script>
@@ -90,7 +93,6 @@
       };
 
       try {
-        // 1) Warten, bis Babel-Standalone wirklich bereit ist (max. 15 Sek.)
         setStatus('Babel wird geladen…');
         const maxWait = 15000;
         const start = Date.now();
@@ -101,9 +103,8 @@
           await new Promise((r) => setTimeout(r, 100));
         }
         if (window.__babelError) throw new Error(window.__babelError);
-        if (typeof Babel === 'undefined') throw new Error('Babel ist geladen, aber nicht verfügbar — unbekannter Fehler.');
+        if (typeof Babel === 'undefined') throw new Error('Babel ist geladen, aber nicht verfügbar.');
 
-        // 2) JSX-Datei holen
         setStatus('Rezept-Finder.jsx wird geladen…');
         const res = await fetch('./Rezept-Finder.jsx');
         if (!res.ok) {
@@ -111,21 +112,18 @@
         }
         const source = await res.text();
 
-        // 3) JSX -> JS kompilieren (als ES-Modul, damit import/export funktionieren)
         setStatus('App wird kompiliert…');
         const compiled = Babel.transform(source, {
           presets: [['react', { runtime: 'classic' }]],
           sourceType: 'module',
         }).code;
 
-        // 4) Als Blob-Modul laden, damit importmap greift
         const blob = new Blob([compiled], { type: 'text/javascript' });
         const url = URL.createObjectURL(blob);
         const mod = await import(url);
         const App = mod.default;
         if (!App) throw new Error('Kein default export in Rezept-Finder.jsx gefunden.');
 
-        // 5) React laden und App rendern
         setStatus('App wird gestartet…');
         const React = await import('react');
         const { createRoot } = await import('react-dom/client');
